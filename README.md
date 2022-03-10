@@ -4,6 +4,37 @@ This is an HTTP server that responds to requests from the nginx auth_request
 directive and authenticates against an OAuth 2.0 service. It has been tested
 against Azure AD OAuth 2.0, as provided with Office 365.
 
+## installation
+
+```
+$ npm install -g nginx-auth-request-oauth2
+``
+
+## operation
+
+The package provides a command: `nars` which runs the HTTP server.
+
+### systemd
+
+To start the server from systemd, create a service file similar to:
+
+```
+[Unit]
+Description=HTTP server for nginx auth_request authentication
+
+[Service]
+Type=simple
+Restart=on-failure
+WorkingDirectory=/tmp
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=nars
+ExecStart=/usr/local/bin/nars
+
+[Install]
+WantedBy=multi-user.target
+```
+
 ## nginx configuration
 
 Example configuration:
@@ -233,3 +264,4 @@ The TCP port on which the nars server listens.
 default: 0.0.0.0
 
 The IP address on which the nars server listens.
+
