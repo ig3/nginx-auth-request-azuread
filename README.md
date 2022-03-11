@@ -1,8 +1,7 @@
-# nginx-auth-request-oauth2
+# nginx-auth-request-azuread
 
 This is an HTTP server that responds to requests from the nginx auth_request
-directive and authenticates against an OAuth 2.0 service. It has been tested
-against Azure AD OAuth 2.0, as provided with Office 365.
+directive and authenticates against Azure AD OAuth 2.0 service.
 
 ## installation
 
@@ -264,4 +263,30 @@ The TCP port on which the nars server listens.
 default: 0.0.0.0
 
 The IP address on which the nars server listens.
+
+## OAuth 2.0
+
+This uses the
+[Microsoft identity platform and OAuth 2.0 authorization code flow](https://docs.microsoft.com/en-us/azure/active-directory/develop/v2-oauth2-auth-code-flow).
+
+The documentation of the flow indicates that the resource server ('Web API'
+in their diagram) must validate the access token but no guidance is provided
+as to how to do this.
+
+In fact, the page says:
+
+> Don't attempt to validate or read tokens for any API you don't own, including the tokens in this example, in your code. Tokens for Microsoft services can use a special format that will not validate as a JWT, and may also be encrypted for consumer (Microsoft account) users. While reading tokens is a useful debugging and learning tool, do not take dependencies on this in your code or assume specifics about tokens that aren't for an API you control.
+
+This seems to contradict the indication in the diagram at the top of the
+page that the 'Web API' server should validate the token. Or is it that the
+access token for the 'Web API' is a token for the API of that server?
+
+Microsoft provides [sample
+code](https://docs.microsoft.com/en-us/azure/active-directory/develop/sample-v2-code),
+including code for NodeJS/Express. What I have looked at indicates that it
+is 'beta' code.
+
+See
+[Microsoft identity platform access tokens](https://docs.microsoft.com/en-us/azure/active-directory/develop/access-tokens) for some details of the access tokens issued by Azure AD.
+
 

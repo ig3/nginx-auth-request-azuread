@@ -54,21 +54,37 @@ app.use(cookieParser());
 //
 app.get('/verify', (req, res) => {
   console.log('GET /auth ' + req.headers['x-original-uri']);
-  if (req.cookies.authToken) {
-    console.log('found an authToken cookie');
-    try {
-      jwt.verify(req.cookies.authToken, config.jwtSecret);
-      console.log('verified the authToken');
-      const token = jwt.sign({ user: req.user }, config.jwtSecret,
-        { expiresIn: config.jwtExpiry });
-      res.cookie('authToken', token, { httpOnly: true });
-      return res.sendStatus(200);
-    } catch (e) {
-      // ignore any errors - invalid JWT - continue
-    }
+  if (!req.cookies.authToken) {
+    console.log('No valid authToken');
+    return res.sendStatus(401);
   }
-  console.log('No valid authToken');
-  res.sendStatus(401);
+  console.log('found an authToken cookie');
+
+  // validate the token: it comes from an untrusted source
+  try {
+    const payload = jwt.verify(req.cookies.authToken, config.jwtSecret);
+    console.log('verified the authToken: ', payload);
+    // Generate a new token if the current one will expire soon
+    if (!payload.exp || (payload.exp - (Date.now() / 1000)) < 600) {
+      try {
+        // jsonwebtoken won't sign if payload includes exp
+        // exp - expiry
+        // iat - issued at
+        delete payload.iat;
+        delete payload.exp;
+        const token = jwt.sign(payload, config.jwtSecret,
+          { expiresIn: config.jwtExpiry });
+        res.cookie('authToken', token, { httpOnly: true });
+      } catch (e) {
+        console.log('error generating new token: ', e);
+      }
+    }
+  } catch (e) {
+    console.log('error validating token: ', e);
+    return res.sendStatus(401);
+  }
+
+  return res.sendStatus(200);
 });
 
 // If the user is not authenticated, /verify will return 401 and that will
@@ -98,6 +114,12 @@ app.get(
 // Create a user object from the access and id tokens.
 // TODO: check for errors flagged in callback request
 // TODO: save the user details somewhere: cookie or session?
+//
+// On what basis are the access and id tokens trusted?
+//
+// The tokens are obtained from a trusted source by an HTTPS request.
+//
+// TODO: validate the tokens 
 app.get(
   '/callback',
   (req, res, next) => {
@@ -109,6 +131,13 @@ app.get(
     // keeps giving errors about missing parameter after several redirects.
     // So instead, use the given access code to get an authorization code.
     // It is one more request, but only when authenticating.
+    //
+    // On the other hand, anyone can send a request to this path. The data
+    // recieved should not be trusted. Redeeming the access code with a
+    // request to the authorization server validates the code. If the access
+    // and id tokens were provided in the request to the callback URI, as in
+    // the hybrid flow they are supposed to be, then it would be necessary
+    // to validate them before trusting them.
     const data = querystring.stringify({
       'client_id': config.oauth_client_id,
       'grant_type': 'authorization_code',
@@ -139,7 +168,12 @@ app.get(
 
       response.on('end', () => {
         const data = JSON.parse(body);
+        // No need to validate the tokens: they come from a trusted source
         const accessToken = jwt.decode(data.access_token);
+        /*
+        const complete = jwt.decode(data.access_token, {complete: true});
+        console.log('complete: ', complete);
+        */
         const idToken = jwt.decode(data.id_token);
         const user = {
           id: accessToken.oid,
@@ -151,8 +185,10 @@ app.get(
             givenName: accessToken.given_name
           }
         };
-        const token = jwt.sign({ user: req.user }, config.jwtSecret,
+        console.log('user: ', user);
+        const token = jwt.sign({ user: user }, config.jwtSecret,
           { expiresIn: config.jwtExpiry });
+        console.log('token: ', token);
         res.cookie('authToken', token, { httpOnly: true });
         console.log('redirect to: ', req.cookies.authURI);
         res.redirect(req.cookies.authURI || '/');

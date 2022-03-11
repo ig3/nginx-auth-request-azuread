@@ -1,5 +1,5 @@
 {
-  "name": "@ig3/nginx-auth-request-oauth2",
+  "name": "@ig3/nginx-auth-request-azuread",
   "version": "0.0.1",
   "description": "Server for nginx auth_request authentication subrequests",
   "main": "./nars.js",
