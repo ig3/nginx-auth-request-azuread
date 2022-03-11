@@ -11,9 +11,8 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const expressSession = require('express-session');
 const cookieParser = require('cookie-parser');
-const mustacheExpress = require('mustache-express');
-const passport = require('passport');
-const PassportOAuth2 = require('passport-oauth2');
+const https = require('https');
+const querystring = require('querystring');
 
 const config = getConfig({
   defaults: {
@@ -36,101 +35,10 @@ app.use(express.urlencoded({ extended: true }));
 // invalidated. A UUID is used as the random secret.
 config.jwtSecret = uuidv4();
 
-// Package express-session provides middleware for saving and retreiving
-// session data. The default MemoryStore is discouraged for production: it
-// leaks memory.
-//
-// This no longer requires cookie-parser and using cookie-parser with a
-// different key might cause problems. Given session state, it may not be
-// necessary to set cookies, in which case cookie-parser isn't required.
-// On the other hand, it might be better if the server were stateless,
-// in which case express-session wouldn't be required.
-//
-// Currently, both express-session and cookie-parser are used. This is far
-// from ideal. At least cookie-parser is used without a secret and both seem
-// to be working.
-//
-// TODO: attempt to make the server stateless and remote express-session.
-//
-app.use(expressSession({
-  secret: uuidv4(),
-  resave: false,
-  saveUninitialized: false
-}));
-
-// We shouldn't use both cookie-parser and express-session. One or the other
-// should suffice. But, at the moment, for historical reasons, both are
-// used.
+// Two cookies are set: one to record the original request URI through
+// authentication and the other a JWT: effectively a bearer token for the
+// authenticated user.
 app.use(cookieParser());
-
-// Package mustache-express provides an express view engine for rendering
-// mustache templates. These were used for the login page but probably
-// aren't needed for OAuth 2.0 based authentication.
-//
-// TODO: determine if these can be removed.
-app.set('views', './views');
-app.set('view engine', 'mustache');
-app.engine('mustache', mustacheExpress());
-
-// Add the Passport strategy for authenticating against Office 365 OAuth 2.0
-//
-// This is based on passport-oauth2. The parameters must coordinate with the
-// application configured in Azure AD.
-passport.use('o365', new PassportOAuth2(
-  {
-    clientID: config.oauth_client_id,
-    clientSecret: config.oauth_client_secret,
-    callbackURL: config.oauth_callback_url,
-    authorizationURL: config.oauth_authorization_url,
-    tokenURL: config.oauth_token_url,
-    state: true,
-    tenant: config.oauth_tenant
-  },
-  (jwtAccessToken, refreshToken, params, profile, cb) => {
-    // TODO: handle errors parsing the tokens
-    const accessToken = jwt.decode(jwtAccessToken);
-    const idToken = jwt.decode(params.id_token);
-    const user = {
-      id: accessToken.oid,
-      username: accessToken.upn,
-      displayName: accessToken.name,
-      email: idToken.email,
-      name: {
-        fmailyName: accessToken.family_name,
-        givenName: accessToken.given_name
-      }
-    };
-    if (config.debug) console.log('user: ', JSON.stringify(user, null, 2));
-    cb(null, user);
-  }
-));
-
-passport.serializeUser((user, done) => {
-  done(null, JSON.stringify(user));
-});
-passport.deserializeUser((user, done) => {
-  done(null, JSON.parse(user));
-});
-
-// passport.initialize() provides express middleware for ???.
-// Note that passport.authenticate is called as middleware explicitly.
-// This call is probably not required. If option userProperty is true it
-// adds property _userProperty to the req object. But here it is called
-// without options, so this isn't done. Otherwise, by default, it adds an
-// _passport property to the req object but this is only done for
-// compatibility with older versions of passport and plugins to them, some
-// of which expect this property to exist. Since a recent passport version
-// is being used, this shouldn't be required. So, it should be OK to remove
-// this.
-app.use(passport.initialize());
-
-// passport.session() provides express middleware that recovers user details
-// from the session state, setting property req.user. It reads req.session,
-// which typically would be set by 'express-session'. In this it looks for
-// req.session.passport.user which should contain the serialization of the
-// user. It calls the user deserialization function, passing it this value.
-// If this returns a user object, this is saved to req.user.
-app.use(passport.session());
 
 //* ***************************
 // Add route handlers
@@ -140,28 +48,12 @@ app.use(passport.session());
 // If the user is authenticated, HTTP status 200 is returned. In this case,
 // nginx proceeds to server the requested content.
 //
-// If the user is not authenticated, HTTP status 401 is returned. In this
-// case, nginx should be configured to direct to GET /authenticate.
-//
-// If the user is not authenticated, it is not possible to begin the
-// authentication immediately because auth_requests expects either status
-// 200 or 401 back and treats any other status as an error. Initiation of
-// OAuth 2.0 authentication is incompatible as it requires a 301 response to
-// redirect to the OAuth 2.0 authorization server. So, a redirect to
-// /authorize is required.
-//
-// Authentication status is determined by the presence of an authToken cookie,
-// the value of which is a JWT token. If the cookie is present and the JWT
-// token is valied (parsable and not expired) then the user is
-// authenticated.
-//
-// This JWT token is produced by this werver when the user authenticates. It
-// is encrypted and has an expiry date.
+// When a user is authenticated, a JWT is stored in cookie authToken. If
+// this token can be retrieved and is still valid, the user is
+// authenticated. Otherwise, the user is not authenticated.
 //
 app.get('/verify', (req, res) => {
-  // Authentication is based on receiving a JWT
-  // TODO: consider keeping authToken in session state rather than a cookie
-  console.log('GET /auth');
+  console.log('GET /auth ' + req.headers['x-original-uri']);
   if (req.cookies.authToken) {
     console.log('found an authToken cookie');
     try {
@@ -179,37 +71,100 @@ app.get('/verify', (req, res) => {
   res.sendStatus(401);
 });
 
-// This is the Passport based authentication route. It initiates the OAuth
-// 2.0 authentication via Azure AD. It should return a redirect to the Azure
-// AD OAuth 2.0 authentication endpoint, with relevant parameters in the
-// query string of the URL. All being well, Azure AD will redirect the user
-// back to the callback URL.
+// If the user is not authenticated, /verify will return 401 and that will
+// be redirected to this path.
+//
+// Set a cookie to record the path they were trying to get, as that will not
+// survive the redirects through the OAuth protocol.
+//
+// Redirect to the OAuth authentication URL.
 app.get(
   '/authenticate',
-  passport.authenticate('o365', { scope: 'User.Read openid' })
+  (req, res, next) => {
+    const uri =
+      'https://' + config.oauth_server + config.oauth_authorization_path +
+      '?response_type=code' +
+      '&client_id=' + config.oauth_client_id +
+      '&redirect_uri=' + encodeURIComponent(req.headers['x-callback']) +
+      '&scope=' + encodeURIComponent(config.oauth_scope) +
+      '&state=mystate';
+    res.cookie('authURI', req.headers['x-original-uri'], { httpOnly: true });
+    res.redirect(uri);
+  }
 );
 
-// This is the Azure AD / OAuth 2.0 callback route. It continues the
-// Passport based authentication.
-// A subset of authentication failures will result in a redirect here, with
-// query parameter 'error' set. passport.authenticate will handle this,
-// sending a 401 response.
+// The OAuth response URI will be proxied here.
+// Use the returned access code to get access and id tokens.
+// Create a user object from the access and id tokens.
+// TODO: check for errors flagged in callback request
+// TODO: save the user details somewhere: cookie or session?
 app.get(
   '/callback',
   (req, res, next) => {
-    console.log('***********************');
-    console.log('url: ', req.url);
-    console.log('query: ', req.query);
-    next();
-  },
-  passport.authenticate('o365'),
-  (req, res) => {
-    console.log('authenticated');
-    // Set a cookie that can be tested by the /auth route handler.
-    const token = jwt.sign({ user: req.user }, config.jwtSecret,
-      { expiresIn: config.jwtExpiry });
-    res.cookie('authToken', token, { httpOnly: true });
-    res.redirect('/');
+    console.log('GET /callback');
+    console.log('cookies: ', req.cookies);
+
+    // If hybrid flow worked we would have everything we need at this point:
+    // authentication and user details. But it doesn't work as documented:
+    // keeps giving errors about missing parameter after several redirects.
+    // So instead, use the given access code to get an authorization code.
+    // It is one more request, but only when authenticating.
+    const data = querystring.stringify({
+      'client_id': config.oauth_client_id,
+      'grant_type': 'authorization_code',
+      'scope': config.oauth_scope,
+      'code': req.query.code,
+      'redirect_uri': req.headers['x-callback'],
+      'client_secret': config.oauth_client_secret
+    });
+
+    const options = {
+      hostname: config.oauth_server,
+      port: 443,
+      method: 'POST',
+      path: config.oauth_token_path,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': data.length
+      }
+    };
+
+    const request = https.request(options, response => {
+
+      let body = '';
+
+      response.on('data', d => {
+        body += d.toString();
+      });
+
+      response.on('end', () => {
+        const data = JSON.parse(body);
+        const accessToken = jwt.decode(data.access_token);
+        const idToken = jwt.decode(data.id_token);
+        const user = {
+          id: accessToken.oid,
+          username: accessToken.upn,
+          displayName: accessToken.name,
+          email: idToken.email,
+          name: {
+            fmailyName: accessToken.family_name,
+            givenName: accessToken.given_name
+          }
+        };
+        const token = jwt.sign({ user: req.user }, config.jwtSecret,
+          { expiresIn: config.jwtExpiry });
+        res.cookie('authToken', token, { httpOnly: true });
+        console.log('redirect to: ', req.cookies.authURI);
+        res.redirect(req.cookies.authURI || '/');
+      });
+    });
+
+    request.on('error', err => {
+      console.log('error: ', err);
+    });
+
+    request.write(data);
+    request.end();
   }
 );
 
