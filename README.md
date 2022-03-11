@@ -289,4 +289,4 @@ is 'beta' code.
 See
 [Microsoft identity platform access tokens](https://docs.microsoft.com/en-us/azure/active-directory/develop/access-tokens) for some details of the access tokens issued by Azure AD.
 
-
+[# of days since the last alg=none JWT vulnerability](https://news.ycombinator.com/item?id=24347519) has some interesting comments about using the payload of JWTs without verifying them. I don't entirely agree: one uses data from trusted sources received by secure channels all the time. Do you verify data from your database every time you query it? No, because you trust the source and the channel. Likewise, if you get a token directly from the token server by HTTPS, it is quite reliable data. If, on the other hand, you get the token from a client who submitted an HTTP request to your public server, then certainly it should be verified before it is trusted as being any more reliable than any other of their input.
