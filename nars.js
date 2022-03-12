@@ -13,6 +13,7 @@ const expressSession = require('express-session');
 const cookieParser = require('cookie-parser');
 const https = require('https');
 const querystring = require('querystring');
+const validUrl = require('valid-url');
 
 const config = getConfig({
   defaults: {
@@ -97,6 +98,18 @@ app.get('/verify', (req, res) => {
 app.get(
   '/authenticate',
   (req, res, next) => {
+    if (!req.headers['x-original-uri']) {
+      console.log('/callback: missing header x-original-uri');
+      return res.sendStatus(500);
+    }
+    if (!req.headers['x-callback']) {
+      console.log('/callback: missing header x-callback');
+      return res.sendStatus(500);
+    }
+    if (!validUrl.isHttpsUri(req.headers['x-callback'])) {
+      console.log('/callback: x-callback is not a valid https URI');
+      return res.sendStatus(500);
+    }
     const uri =
       'https://' + config.oauth_server + config.oauth_authorization_path +
       '?response_type=code' +
@@ -125,6 +138,15 @@ app.get(
   (req, res, next) => {
     console.log('GET /callback');
     console.log('cookies: ', req.cookies);
+
+    if (!req.headers['x-callback']) {
+      console.log('/callback: missing header x-callback');
+      return res.sendStatus(500);
+    }
+    if (!validUrl.isHttpsUri(req.headers['x-callback'])) {
+      console.log('/callback: x-callback is not a valid https URI');
+      return res.sendStatus(500);
+    }
 
     // If hybrid flow worked we would have everything we need at this point:
     // authentication and user details. But it doesn't work as documented:
