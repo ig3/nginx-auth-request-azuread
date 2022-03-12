@@ -11,7 +11,7 @@ $ npm install -g nginx-auth-request-oauth2
 
 ## operation
 
-The package provides a command: `nars` which runs the HTTP server.
+The package provides a command: `naraad` which runs the HTTP server.
 
 ### systemd
 
@@ -27,8 +27,8 @@ Restart=on-failure
 WorkingDirectory=/tmp
 StandardOutput=syslog
 StandardError=syslog
-SyslogIdentifier=nars
-ExecStart=/usr/local/bin/nars
+SyslogIdentifier=naraad
+ExecStart=/usr/local/bin/naraad
 
 [Install]
 WantedBy=multi-user.target
@@ -94,25 +94,25 @@ The paths /auth/verify, /auth/authenticate and /auth/callback are arbitrary
 and specific to the server configuration. They can be set to anything that
 doesn't conflict with paths used by the server generally. It is the paths in
 the proxy_pass directives that must be configured according to the paths
-supported by the nars server.
+supported by the naraad server.
 
 Any location to be protected must have the `auth_request` directive. See the
 nginx documentation for details of how this directive works. Essentially,
 produces a sub-request to the configured path. The nginx server should be
-configured to proxy this location to this nars server at path /verify. In
+configured to proxy this location to this naraad server at path /verify. In
 this example, this is done by the `location /auth/verify` block.
 
-If the user is not authenticated, the nars server will return status 401
+If the user is not authenticated, the naraad server will return status 401
 to the request `GET /verify`.
 
 The directive `error_page 401 /auth/authenticate` redirects this 401 error
 to path `/auth/authenticate` and this location is configured to be proxied
-to the nars server at path `/authenticate`. This request initiates the OAuth
+to the naraad server at path `/authenticate`. This request initiates the OAuth
 2.0 authentication with a redirect to the OAuth 2.0 authentication server.
 
 The OAuth 2.0 authentication server will eventually redirect the browser to
 the configured callback URL. This location (`/auth/callback`) is proxied to
-the nars server at path `/callback`.
+the naraad server at path `/callback`.
 
 If the callback includes valid tokens, then a session token is returned as a
 cookie value.
@@ -171,7 +171,7 @@ proxy_pass. So this path can be set to anything that doesn't conflict with
 the paths used by the protected site.
 
 
-## nars configuration
+## naraad configuration
 
 Configuration may be set in configuration files, environment variables or
 command line parameters.
@@ -180,14 +180,14 @@ Configuration files may be JSON or INI style, with extension .json or .ini
 respectively. 
 
 Configuration file paths:
- * /etc/nars
- * /etc/nars/config
- * ~/.config/nars
- * ~/.config/nars/config
- * ~/.nars
- * ~/.nars/config
- * .nars
- * nars
+ * /etc/naraad
+ * /etc/naraad/config
+ * ~/.config/naraad
+ * ~/.config/naraad/config
+ * ~/.naraad
+ * ~/.naraad/config
+ * .naraad
+ * naraad
 
 Each of these paths will be searched, with extension .json and .ini and any
 configuration file found will be loaded. If multiple files are found they
@@ -195,14 +195,14 @@ will all be loaded and their contents merged with files loaded later
 overriding those loaded earlier, if they contain configuration parameters
 with the same name.
 
-Environment variables with names beginning with  `nars_` will be added to the
+Environment variables with names beginning with  `naraad_` will be added to the
 configuration, possible overriding parameters from the configuration files.
-The leading `nars_` will be removed from the environment variable name. For
-example, environment variable `nars_server_address` would set configuration
+The leading `naraad_` will be removed from the environment variable name. For
+example, environment variable `naraad_server_address` would set configuration
 parameter `server_address`.
 
 Any configuration parameter may also be specified on the command line. For
-example: `nars --server_address 1.2.3.4` would set the server IP address to
+example: `naraad --server_address 1.2.3.4` would set the server IP address to
 1.2.3.4. Configuration parameters set from the command line will override
 any settings from configuration files or environment variables.
 
@@ -224,7 +224,7 @@ Azure AD application.
 This is the callback URL that will be included in the OAuth 2.0
 authentication request. The Azure AD application must be configured to
 accept this callback URL and the nginx server must be configured to proxy
-the callback to the `/callback` path of the nars server.
+the callback to the `/callback` path of the naraad server.
 
 #### oauth_authorization_url
 
@@ -234,7 +234,7 @@ endpoint of the Azure AD instance in which the application is configured.
 
 #### oauth_token_rul
 
-This is the URL that the nars server will access to obtain an access token.
+This is the URL that the naraad server will access to obtain an access token.
 
 #### oauth_tenant
 
@@ -256,13 +256,13 @@ user.
 
 default: 9090
 
-The TCP port on which the nars server listens.
+The TCP port on which the naraad server listens.
 
 #### server_address
 
 default: 0.0.0.0
 
-The IP address on which the nars server listens.
+The IP address on which the naraad server listens.
 
 ## OAuth 2.0
 

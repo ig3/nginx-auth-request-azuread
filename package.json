@@ -2,9 +2,9 @@
   "name": "@ig3/nginx-auth-request-aad",
   "version": "0.0.1",
   "description": "Server for nginx auth_request authentication subrequests",
-  "main": "./nars.js",
+  "main": "./naraad.js",
   "bin": {
-    "nars": "./nars.js"
+    "naraad": "./naraad.js"
   },
   "scripts": {
     "test": "npm run lint && npm run tests",
