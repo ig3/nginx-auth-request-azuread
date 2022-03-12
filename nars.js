@@ -167,31 +167,36 @@ app.get(
       });
 
       response.on('end', () => {
-        const data = JSON.parse(body);
-        // No need to validate the tokens: they come from a trusted source
-        const accessToken = jwt.decode(data.access_token);
-        /*
-        const complete = jwt.decode(data.access_token, {complete: true});
-        console.log('complete: ', complete);
-        */
-        const idToken = jwt.decode(data.id_token);
-        const user = {
-          id: accessToken.oid,
-          username: accessToken.upn,
-          displayName: accessToken.name,
-          email: idToken.email,
-          name: {
-            fmailyName: accessToken.family_name,
-            givenName: accessToken.given_name
-          }
-        };
-        console.log('user: ', user);
-        const token = jwt.sign({ user: user }, config.jwtSecret,
-          { expiresIn: config.jwtExpiry });
-        console.log('token: ', token);
-        res.cookie('authToken', token, { httpOnly: true });
-        console.log('redirect to: ', req.cookies.authURI);
-        res.redirect(req.cookies.authURI || '/');
+        try {
+          const data = JSON.parse(body);
+          // No need to validate the tokens: they come from a trusted source
+          const accessToken = jwt.decode(data.access_token);
+          /*
+          const complete = jwt.decode(data.access_token, {complete: true});
+          console.log('complete: ', complete);
+          */
+          const idToken = jwt.decode(data.id_token);
+          const user = {
+            id: accessToken.oid,
+            username: accessToken.upn,
+            displayName: accessToken.name,
+            email: idToken.email,
+            name: {
+              fmailyName: accessToken.family_name,
+              givenName: accessToken.given_name
+            }
+          };
+          console.log('user: ', user);
+          const token = jwt.sign({ user: user }, config.jwtSecret,
+            { expiresIn: config.jwtExpiry });
+          console.log('token: ', token);
+          res.cookie('authToken', token, { httpOnly: true });
+          console.log('redirect to: ', req.cookies.authURI);
+          res.redirect(req.cookies.authURI || '/');
+        } catch (e) {
+          console.log('error getting access token: ', e);
+          res.sendStatus(500);
+        }
       });
     });
 
