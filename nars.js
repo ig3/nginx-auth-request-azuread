@@ -169,13 +169,16 @@ app.get(
       response.on('end', () => {
         try {
           const data = JSON.parse(body);
+          console.log('data: ', data);
           // No need to validate the tokens: they come from a trusted source
           const accessToken = jwt.decode(data.access_token);
+          console.log('accessToken: ', accessToken);
           /*
           const complete = jwt.decode(data.access_token, {complete: true});
           console.log('complete: ', complete);
           */
           const idToken = jwt.decode(data.id_token);
+          console.log('idToken: ', idToken);
           const user = {
             id: accessToken.oid,
             username: accessToken.upn,
