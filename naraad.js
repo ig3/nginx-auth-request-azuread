@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * This is the main executable of nginx auth_request server: nars
+ * This is the main executable of nginx auth_request server: naraad
  *
+ * This provides an interface between nginx and Azure AD OAuth 2.0 for
+ * authentication of users accessing nginx.
  */
 
 const getConfig = require('@ig3/config');
 const { v4: uuidv4 } = require('uuid');
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const expressSession = require('express-session');
 const cookieParser = require('cookie-parser');
 const https = require('https');
 const querystring = require('querystring');
