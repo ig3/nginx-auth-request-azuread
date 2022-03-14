@@ -255,10 +255,14 @@ app.get(
 // URL with the parameters in the body, instead of the URL as with
 // response_mode query.
 //
+// The response should include an id_token, which should be all we need.
+// The downside of this is that the token comes from the client, so can't
+// be trusted and must be verified.
+//
 app.post(
   '/callback',
   (req, res, next) => {
-    console.log('GET /callback');
+    console.log('POST /callback');
     console.log('cookies: ', req.cookies);
     console.log('query: ', JSON.stringify(req.query, null, 2));
     console.log('body: ', JSON.stringify(req.body, null, 2));
@@ -271,6 +275,10 @@ app.post(
       console.log('/callback: x-callback is not a valid https URI');
       return res.sendStatus(500);
     }
+
+    // TODO: get public key and verify rather than decode
+    const idToken = jwt.decode(body.id_token);
+    console.log('idToken: ', JSON.stringify(idToken, null, 2));
 
     // If hybrid flow worked we would have everything we need at this point:
     // authentication and user details. But it doesn't work as documented:
