@@ -277,7 +277,7 @@ app.post(
     }
 
     // TODO: get public key and verify rather than decode
-    const idToken = jwt.decode(body.id_token);
+    const idToken = jwt.decode(req.body.id_token);
     console.log('idToken: ', JSON.stringify(idToken, null, 2));
 
     // If hybrid flow worked we would have everything we need at this point:
