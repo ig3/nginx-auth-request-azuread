@@ -235,6 +235,130 @@ app.get(
   }
 );
 
+// When using OpenID Connect or hybrid flow with id_token included in the
+// response_type (e.g. "code id_token" or "id_token") then the default
+// response_mode doesn't work. When requesting a code, the default is
+// 'query' but when requesting an id_token it is fragment. The request to
+// the server doesn't include the fragment string. 
+//
+// See: https://stackoverflow.com/questions/2286402/url-fragment-and-302-redirects
+// "It's well known that the URL fragment (the part after the #) is not
+// sent to the server.
+//
+// So, the server doesn't get the accesscode.
+//
+// The only options for response_mode, for OpenID Connect including
+// response_type id_token are fragment or form_post. The query mode which
+// is available if only a code is requested, is not an option.
+//
+// The response_mode form_post results in a POST request to the callback
+// URL with the parameters in the body, instead of the URL as with
+// response_mode query.
+//
+app.post(
+  '/callback',
+  (req, res, next) => {
+    console.log('GET /callback');
+    console.log('cookies: ', req.cookies);
+    console.log('query: ', JSON.stringify(req.query, null, 2));
+    console.log('body: ', JSON.stringify(req.body, null, 2));
+
+    if (!req.headers['x-callback']) {
+      console.log('/callback: missing header x-callback');
+      return res.sendStatus(500);
+    }
+    if (!validUrl.isHttpsUri(req.headers['x-callback'])) {
+      console.log('/callback: x-callback is not a valid https URI');
+      return res.sendStatus(500);
+    }
+
+    // If hybrid flow worked we would have everything we need at this point:
+    // authentication and user details. But it doesn't work as documented:
+    // keeps giving errors about missing parameter after several redirects.
+    // So instead, use the given access code to get an authorization code.
+    // It is one more request, but only when authenticating.
+    //
+    // On the other hand, anyone can send a request to this path. The data
+    // recieved should not be trusted. Redeeming the access code with a
+    // request to the authorization server validates the code. If the access
+    // and id tokens were provided in the request to the callback URI, as in
+    // the hybrid flow they are supposed to be, then it would be necessary
+    // to validate them before trusting them.
+    const data = querystring.stringify({
+      'client_id': config.oauth_client_id,
+      'grant_type': 'authorization_code',
+      'scope': config.oauth_scope,
+      'code': req.query.code,
+      'redirect_uri': req.headers['x-callback'],
+      'client_secret': config.oauth_client_secret
+    });
+
+    const options = {
+      hostname: config.oauth_server,
+      port: 443,
+      method: 'POST',
+      path: config.oauth_token_path,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': data.length
+      }
+    };
+
+    const request = https.request(options, response => {
+
+      let body = '';
+
+      response.on('data', d => {
+        body += d.toString();
+      });
+
+      response.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          console.log('data: ', data);
+          // No need to validate the tokens: they come from a trusted source
+          const accessToken = jwt.decode(data.access_token);
+          console.log('accessToken: ', accessToken);
+          /*
+          const complete = jwt.decode(data.access_token, {complete: true});
+          console.log('complete: ', complete);
+          */
+          const idToken = jwt.decode(data.id_token);
+          console.log('idToken: ', idToken);
+          const user = {
+            id: accessToken.oid,
+            username: accessToken.upn,
+            displayName: accessToken.name,
+            email: idToken.email,
+            name: {
+              fmailyName: accessToken.family_name,
+              givenName: accessToken.given_name
+            }
+          };
+          console.log('user: ', user);
+          const token = jwt.sign({ user: user }, config.jwtSecret,
+            { expiresIn: config.jwtExpiry });
+          console.log('token: ', token);
+          res.cookie('authToken', token, { httpOnly: true });
+          console.log('redirect to: ', req.cookies.authURI);
+          res.redirect(req.cookies.authURI || '/');
+        } catch (e) {
+          console.log('error getting access token: ', e);
+          res.sendStatus(500);
+        }
+      });
+    });
+
+    request.on('error', err => {
+      console.log('error: ', err);
+    });
+
+    request.write(data);
+    request.end();
+  }
+);
+
+
 // Anything else is an error. Log it and return a 404
 app.all('*', (req, res) => {
   console.log('got ', req.method, req.path);
