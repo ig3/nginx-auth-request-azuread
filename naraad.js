@@ -259,6 +259,8 @@ app.get(
 // The downside of this is that the token comes from the client, so can't
 // be trusted and must be verified.
 //
+// Need scope profile to get name, oid, etc.
+//
 app.post(
   '/callback',
   (req, res, next) => {
@@ -277,92 +279,53 @@ app.post(
     }
 
     // TODO: get public key and verify rather than decode
+    // This token comes from the client browser, not from the Azure AD
+    // authentication or token endpoint directly. Therefore, as-is, it
+    // should not be trusted without verification. There are many hoops to
+    // jump to verify it:
+    //
+    //  get configuration https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration
+    //  get keys from jwks_uri
+    //  find the relevant key
+    //  verify the token with the public key
+    //
+    //  The configuration is ephemeral, so it is necessary to fetch it, at
+    //  least periodically. Microsoft recommends once per day. They don't
+    //  document how or when they make changes. Implication of their advice
+    //  is that any configuration issued in the past 24 hours will work.
+    //
+    //  Anyway, this requires two queries: one for the configuration and
+    //  another for the keys. Then a lookup through a list of keys (there
+    //  are only 5 in our current configuration).
+    //
+    //  Using the OAuth 2.0 flow, receiving the access code then redeeming
+    //  that for id and access tokens from trusted source and trusting those
+    //  (i.e. decode rather than verify, because from trusted source) requires
+    //  only 1 additional request, so it seems simpler. 
+    //
+    //  If we were to verify the token either way, then this would be
+    //  simpler.
+    // 
     const idToken = jwt.decode(req.body.id_token);
     console.log('idToken: ', JSON.stringify(idToken, null, 2));
 
-    // If hybrid flow worked we would have everything we need at this point:
-    // authentication and user details. But it doesn't work as documented:
-    // keeps giving errors about missing parameter after several redirects.
-    // So instead, use the given access code to get an authorization code.
-    // It is one more request, but only when authenticating.
-    //
-    // On the other hand, anyone can send a request to this path. The data
-    // recieved should not be trusted. Redeeming the access code with a
-    // request to the authorization server validates the code. If the access
-    // and id tokens were provided in the request to the callback URI, as in
-    // the hybrid flow they are supposed to be, then it would be necessary
-    // to validate them before trusting them.
-    const data = querystring.stringify({
-      'client_id': config.oauth_client_id,
-      'grant_type': 'authorization_code',
-      'scope': config.oauth_scope,
-      'code': req.query.code,
-      'redirect_uri': req.headers['x-callback'],
-      'client_secret': config.oauth_client_secret
-    });
-
-    const options = {
-      hostname: config.oauth_server,
-      port: 443,
-      method: 'POST',
-      path: config.oauth_token_path,
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': data.length
+    const user = {
+      id: idToken.oid,
+      username: idToken.upn,
+      displayName: idToken.name,
+      email: idToken.email,
+      name: {
+        fmailyName: idToken.family_name,
+        givenName: idToken.given_name
       }
     };
-
-    const request = https.request(options, response => {
-
-      let body = '';
-
-      response.on('data', d => {
-        body += d.toString();
-      });
-
-      response.on('end', () => {
-        try {
-          const data = JSON.parse(body);
-          console.log('data: ', data);
-          // No need to validate the tokens: they come from a trusted source
-          const accessToken = jwt.decode(data.access_token);
-          console.log('accessToken: ', accessToken);
-          /*
-          const complete = jwt.decode(data.access_token, {complete: true});
-          console.log('complete: ', complete);
-          */
-          const idToken = jwt.decode(data.id_token);
-          console.log('idToken: ', idToken);
-          const user = {
-            id: accessToken.oid,
-            username: accessToken.upn,
-            displayName: accessToken.name,
-            email: idToken.email,
-            name: {
-              fmailyName: accessToken.family_name,
-              givenName: accessToken.given_name
-            }
-          };
-          console.log('user: ', user);
-          const token = jwt.sign({ user: user }, config.jwtSecret,
-            { expiresIn: config.jwtExpiry });
-          console.log('token: ', token);
-          res.cookie('authToken', token, { httpOnly: true });
-          console.log('redirect to: ', req.cookies.authURI);
-          res.redirect(req.cookies.authURI || '/');
-        } catch (e) {
-          console.log('error getting access token: ', e);
-          res.sendStatus(500);
-        }
-      });
-    });
-
-    request.on('error', err => {
-      console.log('error: ', err);
-    });
-
-    request.write(data);
-    request.end();
+    console.log('user: ', user);
+    const token = jwt.sign({ user: user }, config.jwtSecret,
+      { expiresIn: config.jwtExpiry });
+    console.log('token: ', token);
+    res.cookie('authToken', token, { httpOnly: true });
+    console.log('redirect to: ', req.cookies.authURI);
+    res.redirect(req.cookies.authURI || '/');
   }
 );
 
