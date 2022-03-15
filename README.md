@@ -3,11 +3,11 @@
 This is an HTTP server that responds to requests from the nginx auth_request
 directive and authenticates against Azure AD OAuth 2.0 service.
 
-## installation
+## Installation
 
 ```
 $ npm install -g nginx-auth-request-oauth2
-``
+```
 
 ## operation
 
