@@ -100,28 +100,28 @@ app.get('/verify', (req, res) => {
 app.get(
   '/authenticate',
   (req, res, next) => {
-    if (!req.headers['x-original-uri']) {
-      console.log('/callback: missing header x-original-uri');
+    if (!req.headers['x-original-url']) {
+      console.log('/callback: missing header x-original-url');
       return res.sendStatus(500);
     }
-    if (!req.headers['x-callback']) {
-      console.log('/callback: missing header x-callback');
+    if (!req.headers['x-callback-url']) {
+      console.log('/callback: missing header x-callback-url');
       return res.sendStatus(500);
     }
-    if (!validUrl.isHttpsUri(req.headers['x-callback'])) {
-      console.log('/callback: x-callback is not a valid https URI');
+    if (!validUrl.isHttpsUri(req.headers['x-callback-url'])) {
+      console.log('/callback: x-callback-url is not a valid https URL');
       return res.sendStatus(500);
     }
     const uri =
       'https://' + config.oauth_server + config.oauth_authorization_path +
       '?response_type=code' +
       '&client_id=' + config.oauth_client_id +
-      '&redirect_uri=' + encodeURIComponent(req.headers['x-callback']) +
+      '&redirect_uri=' + encodeURIComponent(req.headers['x-callback-url']) +
       '&scope=' + encodeURIComponent(config.oauth_scope) +
       '&state=mystate';
-    res.cookie('authURI', {
-      original: req.headers['x-original-uri'],
-      callback: req.headers['x-callback']
+    res.cookie('authURL', {
+      original: req.headers['x-original-url'],
+      callback: req.headers['x-callback-url']
     }, { httpOnly: true });
     res.redirect(uri);
   }
@@ -144,9 +144,9 @@ app.get(
     console.log('GET /callback');
     console.log('cookies: ', req.cookies);
 
-    if (!req.cookies.authURI) {
-      console.log('/callback: missing cookie authURI');
-      return res.status(500).send('Missing cookie authURI');
+    if (!req.cookies.authURL) {
+      console.log('/callback: missing cookie authURL');
+      return res.status(500).send('Missing cookie authURL');
     }
 
     // Redeem the access code for access and id tokens.
@@ -156,7 +156,7 @@ app.get(
       'grant_type': 'authorization_code',
       'scope': config.oauth_scope,
       'code': req.query.code,
-      'redirect_uri': req.cookies.authURI.callback,
+      'redirect_uri': req.cookies.authURL.callback,
       'client_secret': config.oauth_client_secret
     });
 
@@ -207,11 +207,11 @@ app.get(
             { expiresIn: config.jwtExpiry });
           console.log('token: ', token);
           res.cookie('authToken', token, { httpOnly: true });
-          res.clearCookie('authURI', {
+          res.clearCookie('authURL', {
             httpOnly: true
           });
-          console.log('redirect to: ', req.cookies.authURI.original);
-          res.redirect(req.cookies.authURI.original || '/');
+          console.log('redirect to: ', req.cookies.authURL.original);
+          res.redirect(req.cookies.authURL.original || '/');
         } catch (e) {
           console.log('error getting access token: ', e);
           res.sendStatus(500);
@@ -262,9 +262,9 @@ app.post(
     console.log('query: ', JSON.stringify(req.query, null, 2));
     console.log('body: ', JSON.stringify(req.body, null, 2));
 
-    if (!req.cookies.authURI) {
-      console.log('/callback: missing cookie authURI');
-      return res.status(500).send('Missing cookie authURI');
+    if (!req.cookies.authURL) {
+      console.log('/callback: missing cookie authURL');
+      return res.status(500).send('Missing cookie authURL');
     }
 
     // TODO: get public key and verify rather than decode
@@ -313,8 +313,8 @@ app.post(
       { expiresIn: config.jwtExpiry });
     console.log('token: ', token);
     res.cookie('authToken', token, { httpOnly: true });
-    console.log('redirect to: ', req.cookies.authURI.original);
-    res.redirect(req.cookies.authURI.original || '/');
+    console.log('redirect to: ', req.cookies.authURL.original);
+    res.redirect(req.cookies.authURL.original || '/');
   }
 );
 

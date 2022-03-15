@@ -1,7 +1,7 @@
-# nginx-auth-request-azuread
+# nginx-auth-request-azuread (naraad)
 
-This is an HTTP server that responds to requests from the nginx auth_request
-directive and authenticates against Azure AD OAuth 2.0 service.
+This is an HTTP server that provides authentication for a website served by
+nginx, based on Azure AD OAuth 2.0 service.
 
 ## Installation
 
@@ -9,44 +9,64 @@ directive and authenticates against Azure AD OAuth 2.0 service.
 $ npm install -g nginx-auth-request-oauth2
 ```
 
-## operation
+## Configuration
 
-The package provides a command: `naraad` which runs the HTTP server.
+Coordinated configuration is required for Azure AD, nginx and naraad (this
+website).
 
-### systemd
 
-To start the server from systemd, create a service file similar to:
+### Azure AD
 
-```
-[Unit]
-Description=HTTP server for nginx auth_request authentication
+Add an application under `App registrations`.
 
-[Service]
-Type=simple
-Restart=on-failure
-WorkingDirectory=/tmp
-StandardOutput=syslog
-StandardError=syslog
-SyslogIdentifier=naraad
-ExecStart=/usr/local/bin/naraad
+Under `Authentication`, `Platform configurations` add web application
+`Web`. Enter the redirect URI. If you use naraad to protect multiple
+websites, you can add multiple redirect URIs: one for each site. There is
+no provision for signout, so no need to set a logout URL.
 
-[Install]
-WantedBy=multi-user.target
-```
+Under `Certificates & secrets`, add a Client Secret. Save the value, to be
+added to naraad configuration (see below). You cannot view the secret value
+later, but you can always add a new secret.
 
-## nginx configuration
+Under `Token configuration` add claims `email`, `family_name`,
+`given_name`, `upn` and `verified_primary_email`. 
+
+Under `API permissions` add `openid`
+
+### nginx
+
+The naraad server responds to three paths: /verify, /authenticate and
+/callback. The nginx server must be configured to pass requests to these
+three routes.
+
+Every request for a protected resource must be passed to the /verify route.
+The naraad server will respond with status 200 if the user is authenticated
+or 401 if not.
+
+The 401 response must be routed to the /authenticate route to initiate
+authenticate. The naraad server will respond with a redirect to the OAuth
+authentication endpoint. This must set two headers: X-Original-URL and
+X-Callback-URL
+
+The callback from OAuth must be passed to the /callback route. The naraad
+server will respond with a redirect to the originally requested URL.
+
+The nginx
+[`auth_request`](https://nginx.org/en/docs/http/ngx_http_auth_request_module.html#auth_request)
+directive must be added to any protected content
+(i.e. content for which authentication and authorization are required),
+with additional configuration to handle the subrequest from `auth_request`
+and the redirect from OAuth 2.0.
 
 Example configuration:
 
 ```
 server {
-  server_name server.example.com;
+  server_name www.example.com;
   listen 443 ssl;
 
   location / {
     auth_request /auth/verify;
-    auth_request_set $auth_user $upstream_http_x_vouch_user;
-    auth_request_set $auth_status $upstream_status;
     auth_request_set $auth_cookie $upstream_http_set_cookie;
     add_header Set-Cookie $auth_cookie;
 
@@ -54,130 +74,54 @@ server {
   }
 
   location = /auth/verify {
-    # This address is where Vouch will be listening
     proxy_pass http://127.0.0.1:9090/verify;
-
-    proxy_pass_request_body off; # no need to send the POST body
+    proxy_pass_request_body off;
     proxy_set_header Content-Length "";
-
-    proxy_set_header X-Original-URI $request_uri;
-    proxy_set_header X-Original-Remote-Addr $remote_addr;
-    proxy_set_header X-Original-Host $host;
   }
 
   error_page 401 = /auth/authenticate;
 
   location /auth/authenticate {
     proxy_pass http://127.0.0.1:9090/authenticate;
-
-    proxy_set_header X-Original-URI $request_uri;
-    proxy_set_header X-Original-Remote-Addr $remote_addr;
-    proxy_set_header X-Original-Host $host;
-    proxy_set_header X-Login-Path /auth/login;
-    proxy_set_header X-URI $uri;
+    proxy_set_header X-Original-URL $request_uri;
+    proxy_set_header X-Callback-URL $scheme://$host/auth/callback;
   }
 
   location /auth/callback {
     proxy_pass http://127.0.0.1:9090/callback;
-
-    proxy_set_header X-Original-URI $request_uri;
-    proxy_set_header X-Original-Remote-Addr $remote_addr;
-    proxy_set_header X-Original-Host $host;
-    proxy_set_header X-Login-Path /auth/login;
-    proxy_set_header X-URI $uri;
   }
-
 }
 ```
 
-The paths /auth/verify, /auth/authenticate and /auth/callback are arbitrary
-and specific to the server configuration. They can be set to anything that
-doesn't conflict with paths used by the server generally. It is the paths in
-the proxy_pass directives that must be configured according to the paths
-supported by the naraad server.
+The paths for the website and for the naraad server are
+independent of each other. In the website, any path that does not conflict
+with other paths in the website may be used, instead of `/auth/verify`,
+`/auth/authenticate` and `/auth/callback` in this example configuration.
 
-Any location to be protected must have the `auth_request` directive. See the
-nginx documentation for details of how this directive works. Essentially,
-produces a sub-request to the configured path. The nginx server should be
-configured to proxy this location to this naraad server at path /verify. In
-this example, this is done by the `location /auth/verify` block.
+The path for the callback from OAuth must correspond to a Redirect URI
+configured in the Azure AD application.
 
-If the user is not authenticated, the naraad server will return status 401
-to the request `GET /verify`.
+One the proxy to naraad `/authenticate`, the headers X-Oringial-URL and
+X-Callback-URL must be set to the URL the user originally requested and the
+URL of the OAuth callback / redirect respectively. If X-Original-URL is not
+set, on completion of authentication the user will be redirected to the
+root of the website (path '/'), regardless of what path was originally
+requested. If X-Callback-URL is not set, the authentication will fail:
+OAuth requires that the callback URL be specified.
 
-The directive `error_page 401 /auth/authenticate` redirects this 401 error
-to path `/auth/authenticate` and this location is configured to be proxied
-to the naraad server at path `/authenticate`. This request initiates the OAuth
-2.0 authentication with a redirect to the OAuth 2.0 authentication server.
+Note that a single instance of naraad can provide authentication for
+multiple web sites, each with their own callback / redirect. The callback /
+redirect for a specific web site is specified by the Header X-Callback-URL
+on the request to /authenticate.
 
-The OAuth 2.0 authentication server will eventually redirect the browser to
-the configured callback URL. This location (`/auth/callback`) is proxied to
-the naraad server at path `/callback`.
+### naraad
 
-If the callback includes valid tokens, then a session token is returned as a
-cookie value.
+There are a few configuration parameters for the naraad server. These
+mostly relate to OAuth and must be coordinated with the application
+configured in Azure AD.
 
-With the cookie returned, the sub-request is complete and nginx serves the
-content originally requested.
-
-## Paths
-
-The server responds to GET requests with paths:
-
-  /auth
-  /auth/office365
-  /auth/office365/callback
-
-Anything else gets a 404.
-
-### /auth
-
-GET /auth returns status 200 if the user is authenticated. Otherwise status
-401.
-
-In nginx configuration, protected content should have an auth_request
-directive that redirects to this path.
-
-For example, to protect all content on the site:
-
-```
-location / {
-  auth_request /auth/verify;
-  auth_request_set $auth_cookie $upstream_http_set_cookie;
-  add_header Set-Cookie $auth_cookie;
-
-  ...
-}
-
-location = /auth/verify {
-  # Set this to whatever address:port the authentication server is on
-  proxy_pass http://127.0.0.1:9090/auth;
-
-  # For these auth requests, the body of the request is irrelevant
-  proxy_pass_request_body off;
-  proxy_set_header Content-Length "";
-
-  # These are not used at the moment but might help with authentication and
-  # access contro.
-  proxy_set_header X-Original-URI $request_uri;
-  proxy_set_header X-Original-Remote_Addr $remote_addr;
-  proxy_set_header X-Original-Host $host;
-}
-```
-
-Note that the path `/auth/verify` is local to the application and nginx. It
-is irrelevant to the authentication server, which only sees the path in the
-proxy_pass. So this path can be set to anything that doesn't conflict with
-the paths used by the protected site.
-
-
-## naraad configuration
-
-Configuration may be set in configuration files, environment variables or
-command line parameters.
-
-Configuration files may be JSON or INI style, with extension .json or .ini
-respectively. 
+Configuration may be JSON5, JSON or INI style, according to the extension
+of the configuration file.
 
 Configuration file paths:
  * /etc/naraad
@@ -189,19 +133,19 @@ Configuration file paths:
  * .naraad
  * naraad
 
-Each of these paths will be searched, with extension .json and .ini and any
-configuration file found will be loaded. If multiple files are found they
-will all be loaded and their contents merged with files loaded later
-overriding those loaded earlier, if they contain configuration parameters
-with the same name.
+Each of these paths will be searched, with extensions .json5, .json and
+.ini and any configuration file found will be loaded. If multiple files are
+found they will all be loaded and their contents merged with files loaded
+later overriding those loaded earlier, if they contain configuration
+parameters with the same name.
 
 Environment variables with names beginning with  `naraad_` will be added to the
-configuration, possible overriding parameters from the configuration files.
+configuration, possibly overriding parameters from the configuration files.
 The leading `naraad_` will be removed from the environment variable name. For
 example, environment variable `naraad_server_address` would set configuration
 parameter `server_address`.
 
-Any configuration parameter may also be specified on the command line. For
+Configuration parameter may also be specified on the command line. For
 example: `naraad --server_address 1.2.3.4` would set the server IP address to
 1.2.3.4. Configuration parameters set from the command line will override
 any settings from configuration files or environment variables.
@@ -264,7 +208,28 @@ default: 0.0.0.0
 
 The IP address on which the naraad server listens.
 
-## OAuth 2.0
+### systemd
+
+To start the server from systemd, create a service file similar to:
+
+```
+[Unit]
+Description=HTTP server for nginx auth_request authentication
+
+[Service]
+Type=simple
+Restart=on-failure
+WorkingDirectory=/tmp
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=naraad
+ExecStart=/usr/local/bin/naraad
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## OAuth 2.0 notes
 
 This uses the
 [Microsoft identity platform and OAuth 2.0 authorization code flow](https://docs.microsoft.com/en-us/azure/active-directory/develop/v2-oauth2-auth-code-flow).
