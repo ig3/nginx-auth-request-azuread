@@ -6,8 +6,24 @@ nginx, based on Azure AD OAuth 2.0 service.
 ## Installation
 
 ```
-$ npm install -g nginx-auth-request-oauth2
+$ npm install -g ig3/nginx-auth-request-aad
 ```
+
+OR
+
+```
+$ git clone https://github.com/ig3/nginx-auth-request-aad.git
+$ npm install
+$ npm pack
+$ npm install -g ig3-nginx-auth-request-aad-*.tgz
+```
+
+Note: `npm pack` creates an installation package and installing this does
+an installation similar to installing from the registry, with all the
+contents copied to the installation directory, as opposed to `npm install
+-g` which will link to the current directory rather than making a copy of
+the contents. The latter might be preferable for testing and development,
+but not for production.
 
 ## Configuration
 
