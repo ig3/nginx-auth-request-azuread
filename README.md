@@ -6,7 +6,7 @@ nginx, based on Azure AD OAuth 2.0 service.
 ## Installation
 
 ```
-$ npm install -g ig3/nginx-auth-request-aad
+$ npm install -g @ig3/nginx-auth-request-aad
 ```
 
 OR

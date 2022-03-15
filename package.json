@@ -1,6 +1,6 @@
 {
   "name": "@ig3/nginx-auth-request-aad",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Server for nginx auth_request authentication subrequests",
   "main": "./naraad.js",
   "bin": {
