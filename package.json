@@ -1,6 +1,6 @@
 {
-  "name": "@ig3/nginx-auth-request-aad",
-  "version": "0.0.3",
+  "name": "@ig3/nginx-auth-request-azuread",
+  "version": "0.0.4",
   "description": "Server for nginx auth_request authentication subrequests",
   "main": "./naraad.js",
   "bin": {
@@ -10,6 +10,10 @@
     "test": "npm run lint && npm run tests",
     "lint": "eslint .",
     "tests": "multi-tape test/*.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:ig3/nginx-auth-request-azuread"
   },
   "author": "",
   "license": "ISC",
