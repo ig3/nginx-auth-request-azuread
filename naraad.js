@@ -55,7 +55,7 @@ app.use(cookieParser());
 // authenticated. Otherwise, the user is not authenticated.
 //
 app.get('/verify', (req, res) => {
-  console.log('GET /auth ' + req.headers['x-original-uri']);
+  console.log('GET /verify ');
   if (!req.cookies.authToken) {
     console.log('No valid authToken');
     return res.sendStatus(401);
@@ -118,7 +118,10 @@ app.get(
       '&redirect_uri=' + encodeURIComponent(req.headers['x-callback']) +
       '&scope=' + encodeURIComponent(config.oauth_scope) +
       '&state=mystate';
-    res.cookie('authURI', req.headers['x-original-uri'], { httpOnly: true });
+    res.cookie('authURI', {
+      original: req.headers['x-original-uri'],
+      callback: req.headers['x-callback']
+    }, { httpOnly: true });
     res.redirect(uri);
   }
 );
@@ -140,33 +143,19 @@ app.get(
     console.log('GET /callback');
     console.log('cookies: ', req.cookies);
 
-    if (!req.headers['x-callback']) {
-      console.log('/callback: missing header x-callback');
-      return res.sendStatus(500);
-    }
-    if (!validUrl.isHttpsUri(req.headers['x-callback'])) {
-      console.log('/callback: x-callback is not a valid https URI');
-      return res.sendStatus(500);
+    if (!req.cookies.authURI) {
+      console.log('/callback: missing cookie authURI');
+      return res.status(500).send('Missing cookie authURI');
     }
 
-    // If hybrid flow worked we would have everything we need at this point:
-    // authentication and user details. But it doesn't work as documented:
-    // keeps giving errors about missing parameter after several redirects.
-    // So instead, use the given access code to get an authorization code.
-    // It is one more request, but only when authenticating.
-    //
-    // On the other hand, anyone can send a request to this path. The data
-    // recieved should not be trusted. Redeeming the access code with a
-    // request to the authorization server validates the code. If the access
-    // and id tokens were provided in the request to the callback URI, as in
-    // the hybrid flow they are supposed to be, then it would be necessary
-    // to validate them before trusting them.
+    // Redeem the access code for access and id tokens.
+    // The token endpoint will validate the access code for us.
     const data = querystring.stringify({
       'client_id': config.oauth_client_id,
       'grant_type': 'authorization_code',
       'scope': config.oauth_scope,
       'code': req.query.code,
-      'redirect_uri': req.headers['x-callback'],
+      'redirect_uri': req.cookies.authURI.callback,
       'client_secret': config.oauth_client_secret
     });
 
@@ -217,8 +206,11 @@ app.get(
             { expiresIn: config.jwtExpiry });
           console.log('token: ', token);
           res.cookie('authToken', token, { httpOnly: true });
-          console.log('redirect to: ', req.cookies.authURI);
-          res.redirect(req.cookies.authURI || '/');
+          res.clearCookie('authURI', {
+            httpOnly: true
+          });
+          console.log('redirect to: ', req.cookies.authURI.original);
+          res.redirect(req.cookies.authURI.original || '/');
         } catch (e) {
           console.log('error getting access token: ', e);
           res.sendStatus(500);
@@ -269,13 +261,9 @@ app.post(
     console.log('query: ', JSON.stringify(req.query, null, 2));
     console.log('body: ', JSON.stringify(req.body, null, 2));
 
-    if (!req.headers['x-callback']) {
-      console.log('/callback: missing header x-callback');
-      return res.sendStatus(500);
-    }
-    if (!validUrl.isHttpsUri(req.headers['x-callback'])) {
-      console.log('/callback: x-callback is not a valid https URI');
-      return res.sendStatus(500);
+    if (!req.cookies.authURI) {
+      console.log('/callback: missing cookie authURI');
+      return res.status(500).send('Missing cookie authURI');
     }
 
     // TODO: get public key and verify rather than decode
@@ -324,8 +312,8 @@ app.post(
       { expiresIn: config.jwtExpiry });
     console.log('token: ', token);
     res.cookie('authToken', token, { httpOnly: true });
-    console.log('redirect to: ', req.cookies.authURI);
-    res.redirect(req.cookies.authURI || '/');
+    console.log('redirect to: ', req.cookies.authURI.original);
+    res.redirect(req.cookies.authURI.original || '/');
   }
 );
 
