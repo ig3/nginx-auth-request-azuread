@@ -68,6 +68,7 @@ app.get('/verify', (req, res) => {
     console.log('verified the authToken: ', payload);
     // Generate a new token if the current one will expire soon
     if (!payload.exp || (payload.exp - (Date.now() / 1000)) < 600) {
+      console.log('set authToken cookie');
       try {
         // jsonwebtoken won't sign if payload includes exp
         // exp - expiry
