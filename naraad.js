@@ -13,7 +13,6 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const https = require('https');
-const querystring = require('querystring');
 const validUrl = require('valid-url');
 
 const config = getConfig({
@@ -151,14 +150,14 @@ app.get(
 
     // Redeem the access code for access and id tokens.
     // The token endpoint will validate the access code for us.
-    const data = querystring.stringify({
+    const data = new URLSearchParams({
       'client_id': config.oauth_client_id,
       'grant_type': 'authorization_code',
       'scope': config.oauth_scope,
       'code': req.query.code,
       'redirect_uri': req.cookies.authURL.callback,
       'client_secret': config.oauth_client_secret
-    });
+    }).toString();
 
     const options = {
       hostname: config.oauth_server,
