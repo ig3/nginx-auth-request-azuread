@@ -274,6 +274,10 @@ See
 
 ## Changes
 
+### 0.0.6 - 20220331
+
+Update version of @ig3/config
+
 ### 0.0.5 - 20220331
 
 Use URLSearchParams instead of querystring
