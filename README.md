@@ -101,6 +101,7 @@ server {
     proxy_pass http://127.0.0.1:9090/authenticate;
     proxy_set_header X-Original-URL $request_uri;
     proxy_set_header X-Auth-Root $scheme://$host/auth;
+    proxy_set_header X-App myapp;
   }
 
   location /auth/ {
@@ -130,6 +131,12 @@ Note that a single instance of naraad can provide authentication for
 multiple web sites, each with their own callback / redirect. The callback /
 redirect for a specific web site is specified by the Header X-Callback-URL
 on the request to /authenticate.
+
+Header `X-Auth-Root` provides the prefix of URL to which various paths are
+appended for authentication, callbacks, etc. 
+
+Header `X-App` selects the application configuration used to compose the
+token returned by authentication.
 
 ### naraad
 
@@ -187,6 +194,17 @@ Example configuration:
       "oauth_token_url": "https://login.microsoftonline.com/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/token",
       "oauth_token_path": "/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/token",
       "oauth_tenant": "saasam.co"
+    }
+  },
+  "applications": {
+    "eqa": {
+      "couchdb": true,
+      "groupMap": {
+        "EQA User": "eqa_user",
+        "EQA Admin": "eqa_admin"
+      },
+      "jwtSecret": "hello",
+      "jwtExpiry": "1h"
     }
   }
 }
@@ -265,6 +283,10 @@ This is the URL that the naraad server will access to obtain an access token.
 This is the Azure AD tenant: typically a domain name that is the root of the
 Azure AD domain.
 
+#### applications
+
+The keys to application should match the value of the X-App header on the
+authentication request.
 
 ### systemd
 
@@ -314,7 +336,74 @@ See
 
 [# of days since the last alg=none JWT vulnerability](https://news.ycombinator.com/item?id=24347519) has some interesting comments about using the payload of JWTs without verifying them. I don't entirely agree: one uses data from trusted sources received by secure channels all the time. Do you verify data from your database every time you query it? No, because you trust the source and the channel. Likewise, if you get a token directly from the token server by HTTPS, it is quite reliable data. If, on the other hand, you get the token from a client who submitted an HTTP request to your public server, then certainly it should be verified before it is trusted as being any more reliable than any other of their input.
 
+## Azure AD notes
+
+### Group Membership
+
+Azure AD OAuth 2.0 interface provides limited information about group
+membership. The only claim supported is the `groups` claim and this only
+provides the set of group IDs but nothing more. In particular, no names are
+provided. To get more information it is necessarly to look up the group
+details via some other API: LDAP or Graph are options.
+
+While the implicit flow is simple, it returns the token in a URL which has
+limited length. Azure AD omits the groups claim if it determines that
+including the set of groups would make the resulting URL too long. See
+[AAD groups claim missing in JWT token for some users](https://stackoverflow.com/questions/45751985/aad-groups-claim-missing-in-jwt-token-for-some-users), which includes these quotes from Microsoft:
+
+> In the implicit flow, oauth will return the Jwt directly from the intial /authorize call through a query string param. The http spec limits the length of a query string / url, so if AAD detects that the resulting URI would be exceeding this length, they replace the groups with the hasGroups claim.
+
+> This is by design when using implicit grant flow, regardless the "groupMembershipClaims" setting in the manifest. It's to avoid to go over the URL length limit of the browser as the token is returned as a URI fragment. So, more or less after 4 user's groups membership, you'll get "hasgroups:true" in the token. What you can do is to make a separate call to the Graph API to query for the user's group membership.
+
+See
+[Security tokens](https://docs.microsoft.com/en-us/azure/active-directory/develop/security-tokens) for details.
+
+So, to get useful information about group membership, the OAuth 2.0 API is
+insufficient. The current API appears to be
+[Microsoft Graph API](https://docs.microsoft.com/en-us/azure/active-directory/develop/microsoft-graph-intro).
+
+But the Microsoft Graph API is obtuse and the documentation moreso. It is
+not at all obvious how to get the names of the groups a user is a member of.
+
+See
+[How to get group names of the user is a member of using Microsoft Graph API?](https://stackoverflow.com/questions/63502897/how-to-get-group-names-of-the-user-is-a-member-of-using-microsoft-graph-api). 
+
+[Include AAD group name in the JWT token](https://stackoverflow.com/questions/59873599/include-aad-group-name-in-the-jwt-token)
+
+[Get list of Microsoft Azure AD group names using MSAL library in Angular 8](https://stackoverflow.com/questions/65694758/get-list-of-microsoft-azure-ad-group-names-using-msal-library-in-angular-8) shows a MS Graph query to get all group ID and name.
+
+I think what I need is
+[List user transitive memberOf](https://docs.microsoft.com/en-us/graph/api/user-list-transitivememberof?view=graph-rest-1.0&tabs=http). This should provide all groups that a user is a member of, directory or indirectly.
+
+Explorting
+[graph-explorer](https://developer.microsoft.com/en-us/graph/graph-explorer)
+it seems the query `https://graph.microsoft.com/v1.0/me/transitiveMemberOf`
+returns details of groups for the authenticated user. Now all I have to do
+is figure out how to call this given the access token from OAuth 2.0.
+
+But among examples in the explorer there is `all groups I belong to
+(director or indirect membership) with count`
+
+`https://graph.microsoft.com/v1.0/me/transitiveMemberOf/microsoft.graph.group?$count=true`
+
+I suspect the `/microsoft.graph.group?$count=true` adds the count.
+
+But the value without this is an array and it is trivial to get the size of
+the array so one wonders what Microsoft things the value of the count field
+is.
+
+To access the Graph API see
+[Get access on behalf of a user](https://docs.microsoft.com/en-us/graph/auth-v2-user)
+
+Based on this, it seems sufficient to get the access token from OAuth 2.0
+API then include this in an 'Authorization: Bearer <token>` header in the
+request to the Graph API.
+
 ## Changes
+
+### 0.0.7 - 20220408
+
+Add support for applications: couchdb
 
 ### 0.0.6 - 20220331
 

@@ -69,9 +69,29 @@ app.get('/verify', (req, res) => {
   }
   console.log('found an authToken cookie');
 
+  let jwtSecret = config.jwtSecret;
+  let jwtExpiry = config.jwtExpiry;
+
+  if (
+    req.cookies.auth &&
+    req.cookies.auth.application &&
+    config.applications[req.cookies.auth.application] &&
+    config.applications[req.cookies.auth.application].jwtSecret
+  ) {
+    jwtSecret = config.applications[req.cookies.auth.application].jwtSecret;
+  }
+  if (
+    req.cookies.auth &&
+    req.cookies.auth.application &&
+    config.applications[req.cookies.auth.application] &&
+    config.applications[req.cookies.auth.application].jwtExpiry
+  ) {
+    jwtExpiry = config.applications[req.cookies.auth.application].jwtExpiry;
+  }
+
   // validate the token: it comes from an untrusted source
   try {
-    const payload = jwt.verify(req.cookies.authToken, config.jwtSecret);
+    const payload = jwt.verify(req.cookies.authToken, jwtSecret);
     console.log('verified the authToken: ', payload);
     // Generate a new token if the current one will expire soon
     if (!payload.exp || (payload.exp - (Date.now() / 1000)) < 600) {
@@ -82,8 +102,8 @@ app.get('/verify', (req, res) => {
         // iat - issued at
         delete payload.iat;
         delete payload.exp;
-        const token = jwt.sign(payload, config.jwtSecret,
-          { expiresIn: config.jwtExpiry });
+        const token = jwt.sign(payload, jwtSecret,
+          { expiresIn: jwtExpiry });
         res.cookie('authToken', token, { httpOnly: true });
       } catch (e) {
         console.log('error generating new token: ', e);
@@ -212,6 +232,13 @@ app.get(
     // The callback URL may be used later to redeem access tokens
     authCookie.callbackURL = callbackURL;
 
+    if (req.headers['x-app']) {
+      console.log('X-App: ', req.headers['x-app']);
+      if (config.applications[req.headers['x-app']]) {
+        authCookie.application = req.headers['x-app'];
+      }
+    }
+
     if (!provider.type) {
       return res.status(500)
         .send('Misconfigured provider: ' + req.params.provider);
@@ -271,93 +298,277 @@ app.get(
       res.code(500).send('Missing callbackURL');
     }
 
+    const application = config.applications[authCookie.application];
+
+    if (application) {
+      console.log('application: ', application);
+    }
+
     if (provider.type === 'o365') {
-      // Redeem the access code for access and id tokens.
-      // The token endpoint will validate the access code for us.
-      const data = new URLSearchParams({
-        'client_id': provider.oauth_client_id,
-        'grant_type': 'authorization_code',
-        'scope': provider.oauth_scope,
-        'code': req.query.code,
-        'redirect_uri': callbackURL,
-        'client_secret': provider.oauth_client_secret
-      }).toString();
-
-      const options = {
-        hostname: provider.oauth_server,
-        port: 443,
-        method: 'POST',
-        path: provider.oauth_token_path,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': data.length
-        }
-      };
-
-      const request = https.request(options, response => {
-
-        let body = '';
-
-        response.on('data', d => {
-          body += d.toString();
-        });
-
-        response.on('end', () => {
-          try {
-            const data = JSON.parse(body);
-            console.log('data: ', data);
-            // No need to validate the tokens: they come from a trusted source
-            const accessToken = jwt.decode(data.access_token);
-            console.log('accessToken: ', accessToken);
-            /*
-            const complete = jwt.decode(data.access_token, {complete: true});
-            console.log('complete: ', complete);
-            */
-            const idToken = jwt.decode(data.id_token);
-            console.log('idToken: ', idToken);
-            const user = {
-              id: accessToken.oid,
-              username: accessToken.upn,
-              displayName: accessToken.name,
-              email: idToken.email,
-              name: {
-                fmailyName: accessToken.family_name,
-                givenName: accessToken.given_name
-              }
-            };
-            console.log('user: ', user);
-            const token = jwt.sign({ user: user }, config.jwtSecret,
-              { expiresIn: config.jwtExpiry });
-            console.log('token: ', token);
-            res.cookie('authToken', token, { httpOnly: true });
-
-            const originalURL = authCookie.originalURL || '/';
-
-            delete authCookie.redirectURL;
-            delete authCookie.originalURL;
-            res.cookie('auth', authCookie, { httpOnly: true });
-
-            console.log('redirect to: ', originalURL);
-            res.redirect(originalURL);
-          } catch (e) {
-            console.log('error getting access token: ', e);
-            res.sendStatus(500);
+      let accessToken;
+      let idToken;
+      let groups;
+      getTokens(provider, req.query.code, callbackURL)
+      .then(result => {
+        accessToken = result.accessToken;
+        idToken = result.idToken;
+        return getGroups(provider, accessToken);
+      })
+      .then(result => {
+        // result is an array with details of all the groups the user
+        // is a member of ('transitive': direct and indirect membership).
+        // Many properties are null: whether that is because the property
+        // isn't defined in Microsoft Graph or because the user doesn't have
+        // permission to read the property is almost impossible to
+        // determine: the documentation doesn't provide field by field
+        // specification of permissions require to get a field value.
+        // All we really care about is mapping the group ID (a Microsoft
+        // surrogate key with no meaning outside the Microsoft database
+        // domain) to the group names (the identifiers meaningful to
+        // business users). The only identifiers are id and displayName.
+        // Presumably id is unique but displayName is not: see
+        // [Azure AD allows duplicate group names](https://morgansimonsen.com/2016/06/28/azure-ad-allows-duplicate-group-names/) for some discussion.
+        // And in Graph, there is no DN for groups.
+        //
+        // We can only glean meaning from the id by examining the related
+        // attributes (like displayName) and analyzing the permissions
+        // granted to the group, but those permissions are only permissions
+        // on resources in the Microsoft realm, so there is no practical way
+        // to express permissions on entities that exist outside the
+        // Microsoft realm (e.g. in a non-Microsoft application), as one
+        // would expect to find in a general purpose platform for
+        // identification and authorization.
+        //
+        // While Microsoft AD, via LDAP, provides a means for recording
+        // fairly arbitrary authorizations in a robust way, including
+        // authorizations to resources not manifest in Microsoft AD,
+        // Microsoft Graph and possibly Azure AD do not.
+        //
+        // Yet this is the elephant we must deal with.
+        //
+        // So, we either map the IDs to permissions at our end of the
+        // displayNames. The IDs are opaque to users, so really not much
+        // good. We will use the display names, despite them not being
+        // unique.
+        //
+        // We can't simply include all groups: That gives us JWT token too
+        // large for a header. The user context data could be passed to the
+        // client in some form other than a Cookie, which would allow larget
+        // size (e.g. in the returned page of the app) or the group names
+        // could be filtered: the application probably only cares about
+        // membership in a small number of groups.
+        //
+        // This request is only going to (all being well) issue a redirect
+        // to the resource the user tried to access before authentication
+        // intervened. Other than headers, limited in size, there is no way
+        // to pass data back to the user. The URL (including query) can't be
+        // changed as that might interfere with the normal function of the
+        // application.
+        //
+        // The data could be added to a server side session store, but that
+        // doesn't scale well. At least that session store could keep large
+        // data for a short time. And practically speaking, in the current
+        // context, it is unlikely there will be more than a few users
+        // authenticated at a time. So, maybe a session store is the better
+        // way to go.
+        //
+        // Thus far, the only app we have that cares about group membership
+        // is CouchDB. It doesn't care about groups per se, but it does deal
+        // with roles, which correspond well enough.
+        //
+        // We need a mapping of Microsoft Graph groups to CouchDB roles.
+        //
+        const accessClaims = jwt.decode(accessToken);
+        console.log('accessToken: ', accessClaims);
+        /*
+        const complete = jwt.decode(data.access_token, {complete: true});
+        console.log('complete: ', complete);
+        */
+        const idClaims = jwt.decode(idToken);
+        console.log('idToken: ', idClaims);
+        const user = {
+          id: accessClaims.oid,
+          username: accessClaims.upn,
+          displayName: accessClaims.name,
+          email: idClaims.email,
+          fullname: {
+            fmailyName: accessClaims.family_name,
+            givenName: accessClaims.given_name
           }
-        });
-      });
+        };
+        /*
+        const user = {
+          name: 'admin',
+          sub: 'admin',
+          '_couchdb.roles': [ '_admin' ],
+        };
+        */
 
-      request.on('error', err => {
-        console.log('error: ', err);
-      });
+        let jwtSecret = config.jwtSecret;
+        let jwtExpiry = config.jwtExpiry;
+        let httpOnly = true;
+        if (application) {
+          if (application.couchdb) {
+            user.sub = accessClaims.upn;
+            user.name = accessClaims.upn;
+            // const roles = [ '_admin' ];
+            const roles = [ ];
+            console.log('map: ', application.groupMap);
+            result.forEach(group => {
+              console.log('group.displayName: ', group.displayName);
+              if (application.groupMap[group.displayName]) {
+                roles.push(application.groupMap[group.displayName]);
+              }
+            });
+            user['_couchdb.roles'] = roles;
+            jwtSecret = application.jwtSecret;
+            jwtExpiry = application.jwtExpiry;
+            httpOnly = false;
+          } else if (application.groupMap) {
+            const groups = {};
+            result.forEach(group => {
+              if (application.groupMap[group.displayName]) {
+                groups[group.displayName] = {
+                  description: group.description,
+                  displayName: group.displayName,
+                  groupTypes: group.groupTypes,
+                  id: group.id,
+                  mail: group.mail,
+                  mailEnabled: group.mailEnabled,
+                  securityEnabled: group.securityEnabled
+                }
+              }
+            });
+            user.groups = groups;
+          }
+        }
+        console.log('user: ', user);
+        const token = jwt.sign(user, jwtSecret,
+          { expiresIn: config.jwtExpiry });
+        console.log('token: ', token);
+        console.log('token size: ', token.length);
+        res.cookie('authToken', token, { httpOnly: httpOnly });
 
-      request.write(data);
-      request.end();
+        const originalURL = authCookie.originalURL || '/';
+
+        delete authCookie.redirectURL;
+        delete authCookie.originalURL;
+        res.cookie('auth', authCookie, { httpOnly: true });
+
+        console.log('redirect to: ', originalURL);
+        res.redirect(originalURL);
+      });
     } else {
       res.status(500)
         .send('Unsupported provider type: ' + provider.type);
     }
   }
 );
+
+function getGroups(provider, accessToken) {
+  return new Promise((resolve, reject) => {
+    // Redeem the access code for access and id tokens.
+    // The token endpoint will validate the access code for us.
+    const options = {
+      hostname: 'graph.microsoft.com',
+      port: 443,
+      method: 'GET',
+      path: '/v1.0/me/transitiveMemberOf',
+      headers: {
+        'Authorization': 'Bearer ' + accessToken
+      }
+    };
+
+    const request = https.request(options, response => {
+
+      let body = '';
+
+      response.on('data', d => {
+        body += d.toString();
+      });
+
+      response.on('end', () => {
+        if (response.statusCode === 200) {
+          try {
+            const data = JSON.parse(body);
+            resolve(data.value);
+          } catch (e) {
+            console.log('error parsing response: ', e);
+            reject(e);
+          }
+        } else {
+          reject(new Error('Response code != 200: ' + response.statusCode));
+        }
+      });
+    });
+
+    request.on('error', err => {
+      console.log('error: ', err);
+    });
+
+    request.end();
+    console.log('request headers: ', request.getHeaders());
+  });
+}
+
+// Given an Azure AD OAuth 2.0 access code, redeem this for an access token
+// and an ID token, returning the tokens.
+function getTokens (provider, accessCode, callbackURL) {
+  return new Promise((resolve, reject) => {
+    // Redeem the access code for access and id tokens.
+    // The token endpoint will validate the access code for us.
+    const data = new URLSearchParams({
+      'client_id': provider.oauth_client_id,
+      'grant_type': 'authorization_code',
+      'scope': provider.oauth_scope,
+      'code': accessCode,
+      'redirect_uri': callbackURL,
+      'client_secret': provider.oauth_client_secret
+    }).toString();
+
+    const options = {
+      hostname: provider.oauth_server,
+      port: 443,
+      method: 'POST',
+      path: provider.oauth_token_path,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': data.length
+      }
+    };
+
+    const request = https.request(options, response => {
+
+      let body = '';
+
+      response.on('data', d => {
+        body += d.toString();
+      });
+
+      response.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          console.log('data: ', data);
+          // No need to validate the tokens: they come from a trusted source
+          resolve({
+            accessToken: data.access_token,
+            idToken: data.id_token
+          });
+        } catch (e) {
+          console.log('error getting access token: ', e);
+          reject(e);
+        }
+      });
+    });
+
+    request.on('error', err => {
+      console.log('error: ', err);
+    });
+
+    request.write(data);
+    request.end();
+  });
+}
 
 // When using AzureAD OpenID Connect or hybrid flow with id_token included in
 // the response_type (e.g. "code id_token" or "id_token") then the default
