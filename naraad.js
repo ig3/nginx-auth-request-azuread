@@ -90,7 +90,11 @@ app.get('/verify', (req, res) => {
       }
     }
   } catch (e) {
-    console.log('error validating token: ', e);
+    if (config.debug) {
+      console.log('error validating token: ', e);
+    } else {
+      console.log('error validating token: ' + e.message);
+    }
     return res.sendStatus(401);
   }
 
@@ -124,7 +128,7 @@ app.get(
       res.redirect(authenticateURL);
     } else {
       res.render('login', {
-        providers: Object.keys(config.providres).map(key => config.providers[key].name)
+        providers: config.providers
       });
     }
   }
@@ -137,6 +141,42 @@ app.get(
 // survive the redirects through the OAuth protocol.
 //
 // Redirect to the OAuth authentication URL.
+app.get(
+  '/authenticate',
+  (req, res) => {
+    console.log('get /authenticate');
+    const authCookie = req.cookies.auth || {};
+
+    if (!authCookie.originalURL) {
+      if (!req.headers['x-original-url']) {
+        console.log('missing header x-original-url');
+        return res.sendStatus(500);
+      }
+      authCookie.originalURL = req.headers['x-original-url'];
+    }
+
+    if (!req.headers['x-auth-root']) {
+      console.log('missing header x-auth-root');
+      return res.sendStatus(500);
+    }
+    if (!validUrl.isHttpsUri(req.headers['x-auth-root'])) {
+      console.log('x-auth-root is not a valid https URL');
+      return res.sendStatus(500);
+    }
+    const authRoot = req.headers['x-auth-root'];
+
+    if (authCookie.provider) {
+      console.log('authenticate with provider: ', authCookie.provider);
+      const redirectURL = authRoot + '/authenticate/' + authCookie.provider;
+      res.redirect(redirectURL);
+    } else {
+      // No provider selected: redirect to the login page
+      const redirectURL = authRoot + '/login';
+      res.redirect(redirectURL);
+    }
+  }
+);
+
 app.get(
   '/authenticate/:provider',
   (req, res, next) => {
