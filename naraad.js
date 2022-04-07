@@ -180,6 +180,7 @@ app.get(
 app.get(
   '/authenticate/:provider',
   (req, res, next) => {
+    console.log('GET /authenticate/:provider');
     if (
       !config.providers ||
       !config.providers[req.params.provider]
@@ -225,12 +226,11 @@ app.get(
         '&scope=' + encodeURIComponent(provider.oauth_scope) +
         '&state=mystate';
       res.cookie('auth', authCookie, { httpOnly: true });
-      res.redirect(uri);
+      return res.redirect(uri);
     } else {
       return res.status(500)
         .send('Unsupported provider type: ' + provider.type);
     }
-    res.status(500).send('This should never happen');
   }
 );
 
