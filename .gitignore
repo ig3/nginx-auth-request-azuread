@@ -3,3 +3,4 @@ node_modules
 nars.json
 *.swp
 ig3-nginx-auth-request-aad*.tgz
+config.json

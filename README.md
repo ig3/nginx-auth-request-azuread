@@ -100,11 +100,12 @@ server {
   location /auth/authenticate {
     proxy_pass http://127.0.0.1:9090/authenticate;
     proxy_set_header X-Original-URL $request_uri;
-    proxy_set_header X-Callback-URL $scheme://$host/auth/callback;
+    proxy_set_header X-Auth-Root $scheme://$host/auth;
   }
 
-  location /auth/callback {
-    proxy_pass http://127.0.0.1:9090/callback;
+  location /auth/ {
+    proxy_pass http://127.0.0.1:9090/;
+    proxy_set_header X-Auth-Root $scheme://$host/auth;
   }
 }
 ```
@@ -166,40 +167,32 @@ example: `naraad --server_address 1.2.3.4` would set the server IP address to
 1.2.3.4. Configuration parameters set from the command line will override
 any settings from configuration files or environment variables.
 
+Example configuration:
+
+```
+{
+  "debug": true,
+  "server_port": 9000,
+  "providers": {
+    "saasam_o365": {
+      "name": "SaaSam O365",
+      "type": "o365",
+      "oauth_client_id": "6ab24693-6778-4cba-99f5-cb7fabd98659",
+      "oauth_client_secret": "ER57Q~.elWGTnljsCpyfXSK~RG-_ZAAAt3.dg",
+      "oauth_scope": "User.Read openid",
+      "oauth_callback_url": "https://auth.entrain.nz/auth/office365/callback",
+      "oauth_server": "login.microsoftonline.com",
+      "oauth_authorization_url": "https://login.microsoftonline.com/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/authorize",
+      "oauth_authorization_path": "/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/authorize",
+      "oauth_token_url": "https://login.microsoftonline.com/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/token",
+      "oauth_token_path": "/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/token",
+      "oauth_tenant": "saasam.co"
+    }
+  }
+}
+```
+
 ### Configuration Parameters
-
-#### oauth_client_id
-
-This is the OAuth 2.0 client ID. It must be consistent with the Client ID
-configured in the Azure AD application.
-
-#### oauth_client_secret
-
-This is the secret that verifies the request to the OAuth 2.0 authentication
-server. It must be consistent with one of the secrets configured in the
-Azure AD application.
-
-#### oauth_callback_url
-
-This is the callback URL that will be included in the OAuth 2.0
-authentication request. The Azure AD application must be configured to
-accept this callback URL and the nginx server must be configured to proxy
-the callback to the `/callback` path of the naraad server.
-
-#### oauth_authorization_url
-
-This is the URL that the user's browser will be directed to, to initiate the
-OAuth 2.0 authentication. It must be set to the OAuth 2.0 authentication
-endpoint of the Azure AD instance in which the application is configured.
-
-#### oauth_token_rul
-
-This is the URL that the naraad server will access to obtain an access token.
-
-#### oauth_tenant
-
-This is the Azure AD tenant: typically a domain name that is the root of the
-Azure AD domain.
 
 #### debug
 
@@ -223,6 +216,55 @@ The TCP port on which the naraad server listens.
 default: 0.0.0.0
 
 The IP address on which the naraad server listens.
+
+#### providers
+
+A set of identity providers.
+
+The key will be used in URLs, unescaped.
+
+Each provider must have:
+
+ * name - the name of the provider presented to users
+ * type - the type of provider: one of ('o365')
+ * type specific parameters
+
+At the moment, there is only one provider type supported: o365. It has the
+following parameters:
+
+##### oauth_client_id
+
+This is the OAuth 2.0 client ID. It must be consistent with the Client ID
+configured in the Azure AD application.
+
+##### oauth_client_secret
+
+This is the secret that verifies the request to the OAuth 2.0 authentication
+server. It must be consistent with one of the secrets configured in the
+Azure AD application.
+
+##### oauth_callback_url
+
+This is the callback URL that will be included in the OAuth 2.0
+authentication request. The Azure AD application must be configured to
+accept this callback URL and the nginx server must be configured to proxy
+the callback to the `/callback` path of the naraad server.
+
+##### oauth_authorization_url
+
+This is the URL that the user's browser will be directed to, to initiate the
+OAuth 2.0 authentication. It must be set to the OAuth 2.0 authentication
+endpoint of the Azure AD instance in which the application is configured.
+
+##### oauth_token_rul
+
+This is the URL that the naraad server will access to obtain an access token.
+
+##### oauth_tenant
+
+This is the Azure AD tenant: typically a domain name that is the root of the
+Azure AD domain.
+
 
 ### systemd
 

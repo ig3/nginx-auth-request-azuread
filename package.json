@@ -21,6 +21,7 @@
     "@ig3/config": "^0.2.2",
     "cookie-parser": "^1.4.6",
     "express": "^4.17.3",
+    "express-handlebars": "^6.0.4",
     "jsonwebtoken": "^8.5.1",
     "uuid": "^8.3.2",
     "valid-url": "^1.0.9"

@@ -14,6 +14,8 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const https = require('https');
 const validUrl = require('valid-url');
+const expressHandlebars = require('express-handlebars');
+const path = require('path');
 
 const config = getConfig({
   defaults: {
@@ -30,6 +32,12 @@ const app = express();
 // application/json or application/x-www-form-urlencoded
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Setup for Handlebars templates
+// const hbs = expressHandlebars.create({});
+app.engine('handlebars', expressHandlebars.engine());
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'handlebars');
 
 // JWT tokens are generated with an ephemeral secret. Every time the server
 // restarts a new secret is generated and all pre-existing tokens are
@@ -89,6 +97,39 @@ app.get('/verify', (req, res) => {
   return res.sendStatus(200);
 });
 
+app.get(
+  '/login',
+  (req, res) => {
+    console.log('GET /login');
+    if (req.query.provider) {
+      if (
+        !config.providers ||
+        !config.providers[req.query.provider]
+      ) {
+        return res.status(500)
+          .send('Unsupported provider: ' + req.query.provider);
+      }
+
+      const provider = config.providers[req.query.provider];
+
+      const authCookie = req.cookies.auth || {};
+      authCookie.provider = req.query.provider;
+      authCookie.originalURL = '/';
+      res.cookie('auth', authCookie, { httpOnly: true });
+      const authRoot = req.headers['x-auth-root'];
+      if (!authRoot) {
+        return res.code(500).send('Missing header x-auth-root');
+      }
+      const authenticateURL = authRoot + '/authenticate/' + req.query.provider;
+      res.redirect(authenticateURL);
+    } else {
+      res.render('login', {
+        providers: Object.keys(config.providres).map(key => config.providers[key].name)
+      });
+    }
+  }
+);
+
 // If the user is not authenticated, /verify will return 401 and that will
 // be redirected to this path.
 //
@@ -97,32 +138,59 @@ app.get('/verify', (req, res) => {
 //
 // Redirect to the OAuth authentication URL.
 app.get(
-  '/authenticate',
+  '/authenticate/:provider',
   (req, res, next) => {
-    if (!req.headers['x-original-url']) {
-      console.log('/callback: missing header x-original-url');
+    if (
+      !config.providers ||
+      !config.providers[req.params.provider]
+    ) {
+      return res.status(500)
+        .send('Unsupported provider: ' + req.params.provider);
+    }
+    const provider = config.providers[req.params.provider];
+    const authCookie = req.cookies.auth || {};
+
+    if (!authCookie.originalURL) {
+      if (!req.headers['x-original-url']) {
+        console.log('missing header x-original-url');
+        return res.sendStatus(500);
+      }
+      authCookie.originalURL = req.headers['x-original-url'];
+    }
+
+    if (!req.headers['x-auth-root']) {
+      console.log('missing header x-auth-root');
       return res.sendStatus(500);
     }
-    if (!req.headers['x-callback-url']) {
-      console.log('/callback: missing header x-callback-url');
+    if (!validUrl.isHttpsUri(req.headers['x-auth-root'])) {
+      console.log('x-auth-root is not a valid https URL');
       return res.sendStatus(500);
     }
-    if (!validUrl.isHttpsUri(req.headers['x-callback-url'])) {
-      console.log('/callback: x-callback-url is not a valid https URL');
-      return res.sendStatus(500);
+    const authRoot = req.headers['x-auth-root'];
+    const callbackURL = authRoot + '/callback/' + req.params.provider;
+    // The callback URL may be used later to redeem access tokens
+    authCookie.callbackURL = callbackURL;
+
+    if (!provider.type) {
+      return res.status(500)
+        .send('Misconfigured provider: ' + req.params.provider);
     }
-    const uri =
-      'https://' + config.oauth_server + config.oauth_authorization_path +
-      '?response_type=code' +
-      '&client_id=' + config.oauth_client_id +
-      '&redirect_uri=' + encodeURIComponent(req.headers['x-callback-url']) +
-      '&scope=' + encodeURIComponent(config.oauth_scope) +
-      '&state=mystate';
-    res.cookie('authURL', {
-      original: req.headers['x-original-url'],
-      callback: req.headers['x-callback-url']
-    }, { httpOnly: true });
-    res.redirect(uri);
+
+    if (provider.type === 'o365') {
+      const uri =
+        'https://' + provider.oauth_server + provider.oauth_authorization_path +
+        '?response_type=code' +
+        '&client_id=' + provider.oauth_client_id +
+        '&redirect_uri=' + encodeURIComponent(callbackURL) +
+        '&scope=' + encodeURIComponent(provider.oauth_scope) +
+        '&state=mystate';
+      res.cookie('auth', authCookie, { httpOnly: true });
+      res.redirect(uri);
+    } else {
+      return res.status(500)
+        .send('Unsupported provider type: ' + provider.type);
+    }
+    res.status(500).send('This should never happen');
   }
 );
 
@@ -138,97 +206,121 @@ app.get(
 //
 // TODO: validate the tokens 
 app.get(
-  '/callback',
+  '/callback/:provider',
   (req, res, next) => {
-    console.log('GET /callback');
+    console.log('GET /callback/:provider');
     console.log('cookies: ', req.cookies);
 
-    if (!req.cookies.authURL) {
-      console.log('/callback: missing cookie authURL');
-      return res.status(500).send('Missing cookie authURL');
+    if (
+      !config.providers ||
+      !config.providers[req.params.provider]
+    ) {
+      return res.status(500)
+        .send('Unsupported provider: ' + req.params.provider);
+    }
+    const provider = config.providers[req.params.provider];
+
+    if (!req.cookies.auth) {
+      console.log('missing cookie auth');
+      return res.status(500).send('Missing cookie auth');
+    }
+    const authCookie = req.cookies.auth || {};
+
+    const callbackURL = authCookie.callbackURL;
+    if (!callbackURL) {
+      res.code(500).send('Missing callbackURL');
     }
 
-    // Redeem the access code for access and id tokens.
-    // The token endpoint will validate the access code for us.
-    const data = new URLSearchParams({
-      'client_id': config.oauth_client_id,
-      'grant_type': 'authorization_code',
-      'scope': config.oauth_scope,
-      'code': req.query.code,
-      'redirect_uri': req.cookies.authURL.callback,
-      'client_secret': config.oauth_client_secret
-    }).toString();
+    if (provider.type === 'o365') {
+      // Redeem the access code for access and id tokens.
+      // The token endpoint will validate the access code for us.
+      const data = new URLSearchParams({
+        'client_id': provider.oauth_client_id,
+        'grant_type': 'authorization_code',
+        'scope': provider.oauth_scope,
+        'code': req.query.code,
+        'redirect_uri': callbackURL,
+        'client_secret': provider.oauth_client_secret
+      }).toString();
 
-    const options = {
-      hostname: config.oauth_server,
-      port: 443,
-      method: 'POST',
-      path: config.oauth_token_path,
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': data.length
-      }
-    };
-
-    const request = https.request(options, response => {
-
-      let body = '';
-
-      response.on('data', d => {
-        body += d.toString();
-      });
-
-      response.on('end', () => {
-        try {
-          const data = JSON.parse(body);
-          console.log('data: ', data);
-          // No need to validate the tokens: they come from a trusted source
-          const accessToken = jwt.decode(data.access_token);
-          console.log('accessToken: ', accessToken);
-          /*
-          const complete = jwt.decode(data.access_token, {complete: true});
-          console.log('complete: ', complete);
-          */
-          const idToken = jwt.decode(data.id_token);
-          console.log('idToken: ', idToken);
-          const user = {
-            id: accessToken.oid,
-            username: accessToken.upn,
-            displayName: accessToken.name,
-            email: idToken.email,
-            name: {
-              fmailyName: accessToken.family_name,
-              givenName: accessToken.given_name
-            }
-          };
-          console.log('user: ', user);
-          const token = jwt.sign({ user: user }, config.jwtSecret,
-            { expiresIn: config.jwtExpiry });
-          console.log('token: ', token);
-          res.cookie('authToken', token, { httpOnly: true });
-          res.clearCookie('authURL', {
-            httpOnly: true
-          });
-          console.log('redirect to: ', req.cookies.authURL.original);
-          res.redirect(req.cookies.authURL.original || '/');
-        } catch (e) {
-          console.log('error getting access token: ', e);
-          res.sendStatus(500);
+      const options = {
+        hostname: provider.oauth_server,
+        port: 443,
+        method: 'POST',
+        path: provider.oauth_token_path,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': data.length
         }
+      };
+
+      const request = https.request(options, response => {
+
+        let body = '';
+
+        response.on('data', d => {
+          body += d.toString();
+        });
+
+        response.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            console.log('data: ', data);
+            // No need to validate the tokens: they come from a trusted source
+            const accessToken = jwt.decode(data.access_token);
+            console.log('accessToken: ', accessToken);
+            /*
+            const complete = jwt.decode(data.access_token, {complete: true});
+            console.log('complete: ', complete);
+            */
+            const idToken = jwt.decode(data.id_token);
+            console.log('idToken: ', idToken);
+            const user = {
+              id: accessToken.oid,
+              username: accessToken.upn,
+              displayName: accessToken.name,
+              email: idToken.email,
+              name: {
+                fmailyName: accessToken.family_name,
+                givenName: accessToken.given_name
+              }
+            };
+            console.log('user: ', user);
+            const token = jwt.sign({ user: user }, config.jwtSecret,
+              { expiresIn: config.jwtExpiry });
+            console.log('token: ', token);
+            res.cookie('authToken', token, { httpOnly: true });
+
+            const originalURL = authCookie.originalURL || '/';
+
+            delete authCookie.redirectURL;
+            delete authCookie.originalURL;
+            res.cookie('auth', authCookie, { httpOnly: true });
+
+            console.log('redirect to: ', originalURL);
+            res.redirect(originalURL);
+          } catch (e) {
+            console.log('error getting access token: ', e);
+            res.sendStatus(500);
+          }
+        });
       });
-    });
 
-    request.on('error', err => {
-      console.log('error: ', err);
-    });
+      request.on('error', err => {
+        console.log('error: ', err);
+      });
 
-    request.write(data);
-    request.end();
+      request.write(data);
+      request.end();
+    } else {
+      res.status(500)
+        .send('Unsupported provider type: ' + provider.type);
+    }
   }
 );
 
-// When using OpenID Connect or hybrid flow with id_token included in the
-// response_type (e.g. "code id_token" or "id_token") then the default
+// When using AzureAD OpenID Connect or hybrid flow with id_token included in
+// the response_type (e.g. "code id_token" or "id_token") then the default
 // response_mode doesn't work. When requesting a code, the default is
 // 'query' but when requesting an id_token it is fragment. The request to
 // the server doesn't include the fragment string. 
@@ -239,7 +331,7 @@ app.get(
 //
 // So, the server doesn't get the accesscode.
 //
-// The only options for response_mode, for OpenID Connect including
+// The only options for response_mode, for AzureAD OpenID Connect including
 // response_type id_token are fragment or form_post. The query mode which
 // is available if only a code is requested, is not an option.
 //
@@ -253,67 +345,86 @@ app.get(
 //
 // Need scope profile to get name, oid, etc.
 //
+
+// This is the original implementation. With support for multiple identity
+// providers, this should no longer be used.
 app.post(
-  '/callback',
+  '/callback/:provider',
   (req, res, next) => {
-    console.log('POST /callback');
+    console.log('POST /callback/:provider');
     console.log('cookies: ', req.cookies);
     console.log('query: ', JSON.stringify(req.query, null, 2));
     console.log('body: ', JSON.stringify(req.body, null, 2));
 
-    if (!req.cookies.authURL) {
-      console.log('/callback: missing cookie authURL');
-      return res.status(500).send('Missing cookie authURL');
+    if (
+      !config.providers ||
+      !config.providers[req.params.provider]
+    ) {
+      return res.status(500)
+        .send('Unsupported provider: ' + req.params.provider);
+    }
+    const provider = config.providers[req.params.provider];
+    const authCookie = req.cookies.auth || {};
+
+    if (!provider.type) {
+      return res.status(500)
+        .send('Misconfigured provider: ' + req.params.provider);
     }
 
-    // TODO: get public key and verify rather than decode
-    // This token comes from the client browser, not from the Azure AD
-    // authentication or token endpoint directly. Therefore, as-is, it
-    // should not be trusted without verification. There are many hoops to
-    // jump to verify it:
-    //
-    //  get configuration https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration
-    //  get keys from jwks_uri
-    //  find the relevant key
-    //  verify the token with the public key
-    //
-    //  The configuration is ephemeral, so it is necessary to fetch it, at
-    //  least periodically. Microsoft recommends once per day. They don't
-    //  document how or when they make changes. Implication of their advice
-    //  is that any configuration issued in the past 24 hours will work.
-    //
-    //  Anyway, this requires two queries: one for the configuration and
-    //  another for the keys. Then a lookup through a list of keys (there
-    //  are only 5 in our current configuration).
-    //
-    //  Using the OAuth 2.0 flow, receiving the access code then redeeming
-    //  that for id and access tokens from trusted source and trusting those
-    //  (i.e. decode rather than verify, because from trusted source) requires
-    //  only 1 additional request, so it seems simpler. 
-    //
-    //  If we were to verify the token either way, then this would be
-    //  simpler.
-    // 
-    const idToken = jwt.decode(req.body.id_token);
-    console.log('idToken: ', JSON.stringify(idToken, null, 2));
+    if (provider.type === 'o365') {
+      // TODO: get public key and verify rather than decode
+      // This token comes from the client browser, not from the Azure AD
+      // authentication or token endpoint directly. Therefore, as-is, it
+      // should not be trusted without verification. There are many hoops to
+      // jump to verify it:
+      //
+      //  get configuration https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration
+      //  get keys from jwks_uri
+      //  find the relevant key
+      //  verify the token with the public key
+      //
+      //  The configuration is ephemeral, so it is necessary to fetch it, at
+      //  least periodically. Microsoft recommends once per day. They don't
+      //  document how or when they make changes. Implication of their advice
+      //  is that any configuration issued in the past 24 hours will work.
+      //
+      //  Anyway, this requires two queries: one for the configuration and
+      //  another for the keys. Then a lookup through a list of keys (there
+      //  are only 5 in our current configuration).
+      //
+      //  Using the OAuth 2.0 flow, receiving the access code then redeeming
+      //  that for id and access tokens from trusted source and trusting those
+      //  (i.e. decode rather than verify, because from trusted source) requires
+      //  only 1 additional request, so it seems simpler. 
+      //
+      //  If we were to verify the token either way, then this would be
+      //  simpler.
+      // 
+      const idToken = jwt.decode(req.body.id_token);
+      console.log('idToken: ', JSON.stringify(idToken, null, 2));
 
-    const user = {
-      id: idToken.oid,
-      username: idToken.upn,
-      displayName: idToken.name,
-      email: idToken.email,
-      name: {
-        fmailyName: idToken.family_name,
-        givenName: idToken.given_name
-      }
-    };
-    console.log('user: ', user);
-    const token = jwt.sign({ user: user }, config.jwtSecret,
-      { expiresIn: config.jwtExpiry });
-    console.log('token: ', token);
-    res.cookie('authToken', token, { httpOnly: true });
-    console.log('redirect to: ', req.cookies.authURL.original);
-    res.redirect(req.cookies.authURL.original || '/');
+      const user = {
+        id: idToken.oid,
+        username: idToken.upn,
+        displayName: idToken.name,
+        email: idToken.email,
+        name: {
+          fmailyName: idToken.family_name,
+          givenName: idToken.given_name
+        }
+      };
+      console.log('user: ', user);
+      const token = jwt.sign({ user: user }, config.jwtSecret,
+        { expiresIn: config.jwtExpiry });
+      console.log('token: ', token);
+      res.cookie('authToken', token, { httpOnly: true });
+      const redirectURL = authCookie.originalURL || '/';
+      console.log('redirect to: ', redirectURL);
+      res.redirect(redirectURL);
+    } else {
+      res.status(500)
+        .send('Unsupported provider type: ' + provider.type);
+    }
   }
 );
 
