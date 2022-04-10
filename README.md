@@ -182,7 +182,7 @@ Example configuration:
   "server_port": 9000,
   "providers": {
     "saasam_o365": {
-      "name": "SaaSam O365",
+      "name": "O365",
       "type": "o365",
       "oauth_client_id": "6ab24693-6778-4cba-99f5-cb7fabd98659",
       "oauth_client_secret": "ER57Q~.elWGTnljsCpyfXSK~RG-_ZAAAt3.dg",
@@ -205,6 +205,15 @@ Example configuration:
       },
       "jwtSecret": "hello",
       "jwtExpiry": "1h"
+    },
+    "withGroups": {
+      "groupMap": {
+        "All Users": "users",
+        "Domain Admins": "admins"
+      }
+    }
+    "adminOnly": {
+      "requireGroup": "Domain Admins"
     }
   }
 }
@@ -287,6 +296,40 @@ Azure AD domain.
 
 The keys to application should match the value of the X-App header on the
 authentication request.
+
+##### couchdb
+
+This application type is specific to CouchDB backend. It adds properties
+`sub`, `name` and `_couchdb.roles` to the generated user object, and uses
+the jwtSecret and jwtExpiry properties of the application object to encode
+the generated JWT token. The jwtSecret should be as configured on the
+CouchDB server: it is the shared secret by which CouchDB trusts the JWT.
+
+##### groupMap
+
+Maps the displayName of groups in Azure AD to group names meaningful to the
+application, and adds these to the user object if the user is a member of
+the corresponding Azure AD group.
+
+For each mapped group that the user is a member of, the user object will
+contain a property in the user.groups object with properties:
+
+ * description
+ * displayName
+ * groupTypes
+ * id
+ * mail
+ * mailEnabled
+ * securityEnabled
+
+These are the values of the corresponding properties of the Azure AD group.
+
+##### requireGroup
+
+The value of this property is the display name of an Azure AD group.
+
+If the user is not a member of this group, authentication will fail and the
+user will be redirected back to the login page.
 
 ### systemd
 
@@ -400,6 +443,10 @@ API then include this in an 'Authorization: Bearer <token>` header in the
 request to the Graph API.
 
 ## Changes
+
+### 0.0.8 - 20220411
+
+Add app flag requireGroup
 
 ### 0.0.7 - 20220408
 

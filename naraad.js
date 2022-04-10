@@ -139,16 +139,18 @@ app.get(
       const authCookie = req.cookies.auth || {};
       authCookie.provider = req.query.provider;
       authCookie.originalURL = '/';
-      res.cookie('auth', authCookie, { httpOnly: true });
       const authRoot = req.headers['x-auth-root'];
       if (!authRoot) {
         return res.code(500).send('Missing header x-auth-root');
       }
+      authCookie.authRoot = authRoot;
+      res.cookie('auth', authCookie, { httpOnly: true });
       const authenticateURL = authRoot + '/authenticate/' + req.query.provider;
       res.redirect(authenticateURL);
     } else {
       res.render('login', {
-        providers: config.providers
+        providers: config.providers,
+        flash: req.query.flash
       });
     }
   }
@@ -184,6 +186,9 @@ app.get(
       return res.sendStatus(500);
     }
     const authRoot = req.headers['x-auth-root'];
+
+    authCookie.authRoot = authRoot;
+    res.cookie('auth', authCookie, { httpOnly: true });
 
     if (authCookie.provider) {
       console.log('authenticate with provider: ', authCookie.provider);
@@ -424,7 +429,8 @@ app.get(
             jwtSecret = application.jwtSecret;
             jwtExpiry = application.jwtExpiry;
             httpOnly = false;
-          } else if (application.groupMap) {
+          }
+          if (application.groupMap) {
             const groups = {};
             result.forEach(group => {
               if (application.groupMap[group.displayName]) {
@@ -440,6 +446,19 @@ app.get(
               }
             });
             user.groups = groups;
+          }
+          if (application.requireGroup) {
+            let member = false;
+            result.forEach(group => {
+              if (group.displayName === application.requireGroup) {
+                member = true;
+              }
+            });
+            if (!member) {
+              const redirectURL = authRoot + '/login' +
+                '?flash=' + encodeURIComponent('Unauthorized');
+              res.redirect(redirectURL);
+            }
           }
         }
         console.log('user: ', user);
