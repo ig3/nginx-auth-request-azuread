@@ -287,6 +287,7 @@ app.get(
     }
     const authCookie = req.cookies.auth || {};
 
+    const authRoot = req.headers['x-auth-root'];
     const callbackURL = authRoot + '/callback/' + req.params.provider;
 
     const application = config.applications[req.headers['x-app']];

@@ -453,6 +453,10 @@ request to the Graph API.
 
 ## Changes
 
+### 0.0.10 - 20220411
+
+Fix reference to authRoot.
+
 ### 0.0.9 - 20220411
 
 Stop using cookies for sensitive parameters.
