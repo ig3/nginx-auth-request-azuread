@@ -213,7 +213,10 @@ Example configuration:
       }
     }
     "adminOnly": {
-      "requireGroup": "Domain Admins"
+      "requireGroups": "Domain Admins"
+    },
+    "adminOrUser": {
+      "requireGroups": [ "Domain Admins", "Domain Users" ]
     }
   }
 }
@@ -324,12 +327,14 @@ contain a property in the user.groups object with properties:
 
 These are the values of the corresponding properties of the Azure AD group.
 
-##### requireGroup
+##### requireGroups
 
-The value of this property is the display name of an Azure AD group.
+The value of this property is the display name of an Azure AD group or an
+array of such display names. Access is allowed if the user is a member of
+any of the groups.
 
-If the user is not a member of this group, authentication will fail and the
-user will be redirected back to the login page.
+If the user is not a member of any of the groups, authentication will fail
+and the user will be redirected back to the login page.
 
 ### systemd
 
@@ -446,7 +451,7 @@ request to the Graph API.
 
 ### 0.0.8 - 20220411
 
-Add app flag requireGroup
+Add app flag requireGroups
 
 ### 0.0.7 - 20220408
 

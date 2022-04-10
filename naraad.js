@@ -434,7 +434,7 @@ app.get(
             const groups = {};
             result.forEach(group => {
               if (application.groupMap[group.displayName]) {
-                groups[group.displayName] = {
+                groups[application.groupMap[group.displayName]] = {
                   description: group.description,
                   displayName: group.displayName,
                   groupTypes: group.groupTypes,
@@ -447,10 +447,16 @@ app.get(
             });
             user.groups = groups;
           }
-          if (application.requireGroup) {
+          if (application.requireGroups) {
             let member = false;
             result.forEach(group => {
-              if (group.displayName === application.requireGroup) {
+              if (
+                typeof application.requireGroups === 'string' &&
+                group.displayName === application.requireGroup
+                ||
+                typeof application.requireGroups === 'object' &&
+                Array.indexOf(group.displayName) !== -1
+              ) {
                 member = true;
               }
             });
