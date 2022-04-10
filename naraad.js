@@ -143,7 +143,6 @@ app.get(
       if (!authRoot) {
         return res.code(500).send('Missing header x-auth-root');
       }
-      authCookie.authRoot = authRoot;
       res.cookie('auth', authCookie, { httpOnly: true });
       const authenticateURL = authRoot + '/authenticate/' + req.query.provider;
       res.redirect(authenticateURL);
@@ -187,7 +186,6 @@ app.get(
     }
     const authRoot = req.headers['x-auth-root'];
 
-    authCookie.authRoot = authRoot;
     res.cookie('auth', authCookie, { httpOnly: true });
 
     if (authCookie.provider) {
@@ -234,15 +232,6 @@ app.get(
     }
     const authRoot = req.headers['x-auth-root'];
     const callbackURL = authRoot + '/callback/' + req.params.provider;
-    // The callback URL may be used later to redeem access tokens
-    authCookie.callbackURL = callbackURL;
-
-    if (req.headers['x-app']) {
-      console.log('X-App: ', req.headers['x-app']);
-      if (config.applications[req.headers['x-app']]) {
-        authCookie.application = req.headers['x-app'];
-      }
-    }
 
     if (!provider.type) {
       return res.status(500)
@@ -298,12 +287,9 @@ app.get(
     }
     const authCookie = req.cookies.auth || {};
 
-    const callbackURL = authCookie.callbackURL;
-    if (!callbackURL) {
-      res.code(500).send('Missing callbackURL');
-    }
+    const callbackURL = authRoot + '/callback/' + req.params.provider;
 
-    const application = config.applications[authCookie.application];
+    const application = config.applications[req.headers['x-app']];
 
     if (application) {
       console.log('application: ', application);
@@ -477,7 +463,6 @@ app.get(
 
         const originalURL = authCookie.originalURL || '/';
 
-        delete authCookie.redirectURL;
         delete authCookie.originalURL;
         res.cookie('auth', authCookie, { httpOnly: true });
 

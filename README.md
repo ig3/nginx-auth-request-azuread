@@ -107,6 +107,7 @@ server {
   location /auth/ {
     proxy_pass http://127.0.0.1:9090/;
     proxy_set_header X-Auth-Root $scheme://$host/auth;
+    proxy_set_header X-App myapp;
   }
 }
 ```
@@ -137,6 +138,9 @@ appended for authentication, callbacks, etc.
 
 Header `X-App` selects the application configuration used to compose the
 token returned by authentication.
+
+Headers `X-Auth-Root` and `X-App` should be set on every request proxied to
+this server, except the `/verify` path, where they are ignored.
 
 ### naraad
 
@@ -448,6 +452,10 @@ API then include this in an 'Authorization: Bearer <token>` header in the
 request to the Graph API.
 
 ## Changes
+
+### 0.0.9 - 20220411
+
+Stop using cookies for sensitive parameters.
 
 ### 0.0.8 - 20220411
 
