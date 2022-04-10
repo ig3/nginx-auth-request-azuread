@@ -448,6 +448,7 @@ app.get(
             user.groups = groups;
           }
           if (application.requireGroups) {
+            console.log('require groups: ', application.requireGroups);
             let member = false;
             result.forEach(group => {
               if (
@@ -455,7 +456,7 @@ app.get(
                 group.displayName === application.requireGroup
                 ||
                 typeof application.requireGroups === 'object' &&
-                Array.indexOf(group.displayName) !== -1
+                application.requireGroups.indexOf(group.displayName) !== -1
               ) {
                 member = true;
               }
