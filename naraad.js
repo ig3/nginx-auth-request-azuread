@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * This is the main executable of nginx auth_request server: naraad
+ * This is an HTTP server based on Express.
  *
- * This provides an interface between nginx and Azure AD OAuth 2.0 for
- * authentication of users accessing nginx.
+ * It handles requests from nginx auth_request directive to control access
+ * to resources.
+ *
+ * It sets a cookie containing a JWT which confirms authentication and
+ * authorization. It is this JWT which is validated in the verify request
+ * from the auth_request directive.
+ *
+ * The JWT may be created to be compatible with CouchDB JWT authentication.
  */
 
 const getConfig = require('@ig3/config');
@@ -52,63 +58,47 @@ app.use(cookieParser());
 //* ***************************
 // Add route handlers
 
-// GET /verify handles the primary request from nginx auth_request.
+// GET /verify handles the sub-request from nginx auth_request.
 //
-// If the user is authenticated, HTTP status 200 is returned. In this case,
-// nginx proceeds to server the requested content.
+// If the value of the authToken cookie is a JWT signed with a secret which
+// should be known only to this server, then the user is deemed to be
+// authenticated and authorized. This does not depend on the claims of the
+// JWT, beyond it still being valid / not expired.
 //
-// When a user is authenticated, a JWT is stored in cookie authToken. If
-// this token can be retrieved and is still valid, the user is
-// authenticated. Otherwise, the user is not authenticated.
+// If the JWT is verified successfully, HTTP status 200 is returned.
+// Otherwise status 401 is returned.
+//
+// The nginx configuration should redirect the 401 response to the
+// /authenticate path of this server, to initiate authentication of the user.
 //
 app.get('/verify', (req, res) => {
-  console.log('GET /verify ');
   if (!req.cookies.authToken) {
     console.log('No valid authToken');
     return res.sendStatus(401);
   }
-  console.log('found an authToken cookie');
 
   let jwtSecret = config.jwtSecret;
   let jwtExpiry = config.jwtExpiry;
 
+  // The application may overfide the default jwtSecret and/or jwtExpiry
+  const application = config.applications[req.headers['x-app']];
   if (
-    req.cookies.auth &&
-    req.cookies.auth.application &&
-    config.applications[req.cookies.auth.application] &&
-    config.applications[req.cookies.auth.application].jwtSecret
+    application &&
+    config.applications &&
+    config.applications[application]
   ) {
-    jwtSecret = config.applications[req.cookies.auth.application].jwtSecret;
-  }
-  if (
-    req.cookies.auth &&
-    req.cookies.auth.application &&
-    config.applications[req.cookies.auth.application] &&
-    config.applications[req.cookies.auth.application].jwtExpiry
-  ) {
-    jwtExpiry = config.applications[req.cookies.auth.application].jwtExpiry;
+    if (config.applications[application].jwtSecret)
+      jwtSecret = config.applications[application].jwtSecret;
+
+    if (config.applications[application].jwtExpiry)
+      jwtExpiry = config.applications[application].jwtExpiry;
   }
 
-  // validate the token: it comes from an untrusted source
+  // validate the token: it comes from an untrusted source but we can trust
+  // it if we verify it successfully, assuming jwtSecret is truly secret.
+  let payload;
   try {
-    const payload = jwt.verify(req.cookies.authToken, jwtSecret);
-    console.log('verified the authToken: ', payload);
-    // Generate a new token if the current one will expire soon
-    if (!payload.exp || (payload.exp - (Date.now() / 1000)) < 600) {
-      console.log('set authToken cookie');
-      try {
-        // jsonwebtoken won't sign if payload includes exp
-        // exp - expiry
-        // iat - issued at
-        delete payload.iat;
-        delete payload.exp;
-        const token = jwt.sign(payload, jwtSecret,
-          { expiresIn: jwtExpiry });
-        res.cookie('authToken', token, { httpOnly: true });
-      } catch (e) {
-        console.log('error generating new token: ', e);
-      }
-    }
+    payload = jwt.verify(req.cookies.authToken, jwtSecret);
   } catch (e) {
     if (config.debug) {
       console.log('error validating token: ', e);
@@ -117,10 +107,38 @@ app.get('/verify', (req, res) => {
     }
     return res.sendStatus(401);
   }
+  console.log('verified the authToken: ', payload);
+
+  // Generate a new token if the current one will expire soon
+  if (!payload.exp || (payload.exp - (Date.now() / 1000)) < 600) {
+    console.log('set authToken cookie');
+    try {
+      // jsonwebtoken won't sign if payload includes exp
+      // exp - expiry
+      // iat - issued at
+      delete payload.iat;
+      delete payload.exp;
+      const token = jwt.sign(payload, jwtSecret,
+        { expiresIn: jwtExpiry });
+      res.cookie('authToken', token, { httpOnly: true });
+    } catch (e) {
+      console.log('error generating new token: ', e);
+    }
+  }
 
   return res.sendStatus(200);
 });
 
+// GET /login returns a page which allows the user to choose an
+// authentication provider. The release code only supports provider type
+// o365, for authentication by Azure AD OAuth 2.0, but other providers may
+// be supported in development or future releases.
+//
+// Authentication failures may be directed here. If the request includes
+// query parameter 'flash' then the value of this will be presented to the
+// user. This may be used to inform the user of the reason for the
+// authentication failure.
+//
 app.get(
   '/login',
   (req, res) => {
@@ -155,13 +173,22 @@ app.get(
   }
 );
 
-// If the user is not authenticated, /verify will return 401 and that will
-// be redirected to this path.
+// GET /authenticate initiates authentication.
 //
-// Set a cookie to record the path they were trying to get, as that will not
-// survive the redirects through the OAuth protocol.
+// The authentication provider should be specified in the 'provider'
+// attribute of the 'auth' cookie. If not, the user is redirected to
+// '/login/' to select a provider.
 //
-// Redirect to the OAuth authentication URL.
+// The URL to which the user will be redirected after successful
+// authentication may be specified in the 'originalURL' parameter of the
+// 'auth' cookie, or in header 'x-original-url'.
+//
+// This path is saved in the 'auth' cookie because otherwise it will not
+// survive the redirects through the authentication process.
+//
+// All being well, this redirects to that authentication provider specific
+// path '/authenticate/:provider'. The user may be redirected directly to
+// this path, avoiding this request entirely.
 app.get(
   '/authenticate',
   (req, res) => {
@@ -200,6 +227,9 @@ app.get(
   }
 );
 
+// GET /authenticate/:provider initiates authentication via a particular
+// authentication provider. Only Azure AD OAuth 2.0 is supported but other
+// providers may be supported in furture releases.
 app.get(
   '/authenticate/:provider',
   (req, res, next) => {
