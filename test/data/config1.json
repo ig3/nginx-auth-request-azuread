@@ -1,0 +1,5 @@
+{
+  "applications": {
+  },
+  "jwtExpiry": "1h"
+}

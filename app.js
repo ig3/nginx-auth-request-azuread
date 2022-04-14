@@ -13,7 +13,7 @@
  * The JWT may be created to be compatible with CouchDB JWT authentication.
  */
 
-const getConfig = require('@ig3/config');
+// const getConfig = require('@ig3/config');
 const { v4: uuidv4 } = require('uuid');
 const express = require('express');
 const jwt = require('jsonwebtoken');
@@ -23,6 +23,8 @@ const validUrl = require('valid-url');
 const expressHandlebars = require('express-handlebars');
 const path = require('path');
 
+let config = {};
+/*
 const config = getConfig({
   defaults: {
     server_address: '0.0.0.0',
@@ -30,6 +32,7 @@ const config = getConfig({
     jwtExpiry: '1h'
   }
 });
+*/
 console.log('config: ', JSON.stringify(config, null, 2));
 
 const app = express();
@@ -78,7 +81,7 @@ app.get('/verify', (req, res) => {
   }
 
   let jwtSecret = config.jwtSecret;
-  let jwtExpiry = config.jwtExpiry;
+  let jwtExpiry = config.jwtExpiry || '1h';
 
   // The application may overfide the default jwtSecret and/or jwtExpiry
   const application = config.applications[req.headers['x-app']];
@@ -422,7 +425,7 @@ app.get(
         */
 
         let jwtSecret = config.jwtSecret;
-        let jwtExpiry = config.jwtExpiry;
+        let jwtExpiry = config.jwtExpiry || '1h';
         let httpOnly = true;
         if (application) {
           if (application.couchdb) {
@@ -725,14 +728,10 @@ app.all('*', (req, res) => {
 // End of routes
 //* ***************************
 
-// Start the server
-const server = app.listen(config.server_port, config.server_address);
-
-server.on('error', err => {
-  console.log('express server listen failed: ', err);
-});
-
-server.on('listening', () => {
-  console.log('express server listening on http://' +
-    server.address().address + ':' + server.address().port);
-});
+app.server_port = config.server_port;
+app.server_address = config.server_address;
+module.exports = (cfg) => {
+  config = cfg;
+  config.jwtSecret = uuidv4();
+  return app;
+};
