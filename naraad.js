@@ -89,6 +89,8 @@ app.get('/verify', (req, res) => {
     jwtExpiry = config.applications[req.cookies.auth.application].jwtExpiry;
   }
 
+  console.log('jwtSecret: ', jwtSecret);
+
   // validate the token: it comes from an untrusted source
   try {
     const payload = jwt.verify(req.cookies.authToken, jwtSecret);
@@ -445,13 +447,15 @@ app.get(
                 typeof application.requireGroups === 'object' &&
                 application.requireGroups.indexOf(group.displayName) !== -1
               ) {
+                console.log('User is a member of required group: ', group.displayName);
                 member = true;
               }
             });
             if (!member) {
+              console.log('User is not a member of any required group');
               const redirectURL = authRoot + '/login' +
                 '?flash=' + encodeURIComponent('Unauthorized');
-              res.redirect(redirectURL);
+              return res.redirect(redirectURL);
             }
           }
         }
