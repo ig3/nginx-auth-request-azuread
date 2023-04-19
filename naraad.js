@@ -292,6 +292,7 @@ app.get(
     const authRoot = req.headers['x-auth-root'];
     const callbackURL = authRoot + '/callback/' + req.params.provider;
 
+    console.log('request for app: ' + req.headers['x-app']);
     const application = config.applications[req.headers['x-app']];
 
     if (application) {
@@ -440,6 +441,7 @@ app.get(
             console.log('require groups: ', application.requireGroups);
             let member = false;
             result.forEach(group => {
+              console.log('Found AD group: ' + group.displayName);
               if (
                 typeof application.requireGroups === 'string' &&
                 group.displayName === application.requireGroup
