@@ -1,14 +1,9 @@
 'use strict';
 
-// Test GET /verify route
+// Test route: GET /login
 //
-// This route handles the sub-request from nginx auth_request directive.
-//
-// It checks for a valid JWT in cooke authToken. If it finds one, it returns
-// HTTP status 200, allowing the request to nginx to proceed. Otherwise it
-// returns status 401 (unauthorized) or 500 (errors).
-//
-// If the JWT is verified but about to expire, a new token is issued.
+// This route returns the login page, allowing the user to select an
+// authentication provider from among those configured.
 //
 
 const fs = require('fs');
@@ -45,7 +40,7 @@ function runTests (port) {
       baseURL: 'http://localhost:' + port + '/'
     });
 
-    t.test('verify returns 200 if valid authToken', (t) => {
+    t.test('verify returns 200', (t) => {
       const token = jwt.sign({}, config.jwtSecret, { expiresIn: config.jwtExpiry });
       request({
         url: '/verify',

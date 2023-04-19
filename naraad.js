@@ -80,8 +80,19 @@ app.get('/verify', (req, res) => {
   let jwtSecret = config.jwtSecret;
   let jwtExpiry = config.jwtExpiry;
 
-  // The application may overfide the default jwtSecret and/or jwtExpiry
+  console.log('request header x-app: ' + req.headers['x-app']);
+  if (
+    !config.applications ||
+    !config.applications[req.headers['x-app']]
+  ) {
+    console.log('No application configured matching X-App header: ' + req.headers['x-app']);
+    console.log('config.applications is: ' + JSON.stringify(config.applications, null, 2));
+    return res.sendStatus(401);
+  }
   const application = config.applications[req.headers['x-app']];
+  console.log('processing application: ' + JSON.stringify(application, null, 2));
+
+  // The application may overfide the default jwtSecret and/or jwtExpiry
   if (
     application &&
     config.applications &&
@@ -316,7 +327,17 @@ app.get(
     const authRoot = req.headers['x-auth-root'];
     const callbackURL = authRoot + '/callback/' + req.params.provider;
 
+    console.log('request header x-app: ' + req.headers['x-app']);
+    if (
+      !config.applications ||
+      !config.applications[req.headers['x-app']]
+    ) {
+      console.log('No application configured matching X-App header: ' + req.headers['x-app']);
+      console.log('config.applications is: ' + JSON.stringify(config.applications, null, 2));
+      return res.sendStatus(401);
+    }
     const application = config.applications[req.headers['x-app']];
+    console.log('processing application: ' + JSON.stringify(application, null, 2));
 
     if (application) {
       console.log('application: ', application);
@@ -459,10 +480,13 @@ app.get(
             });
             user.groups = groups;
           }
+          // If application.requireGroups is an array, user must be a
+          // member of at least one of the groups, not all of them.
           if (application.requireGroups) {
             console.log('require groups: ', application.requireGroups);
             let member = false;
             result.forEach(group => {
+              console.log('User is in AD group: ' + group.displayName);
               if (
                 (
                   typeof application.requireGroups === 'string' &&
@@ -472,10 +496,12 @@ app.get(
                   application.requireGroups.indexOf(group.displayName) !== -1
                 )
               ) {
+                console.log('found required group: ' + group.displayName);
                 member = true;
               }
             });
             if (!member) {
+              console.log('user is not a member of any required group');
               const redirectURL = authRoot + '/login' +
                 '?flash=' + encodeURIComponent('Unauthorized');
               res.redirect(redirectURL);
