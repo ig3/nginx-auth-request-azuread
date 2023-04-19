@@ -1,6 +1,6 @@
 {
   "name": "@ig3/nginx-auth-request-azuread",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Server for nginx auth_request authentication subrequests",
   "main": "./naraad.js",
   "bin": {
