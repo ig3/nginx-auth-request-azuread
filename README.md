@@ -453,6 +453,10 @@ request to the Graph API.
 
 ## Changes
 
+### 1.0.0 - 20220429
+
+Enhance logging for application requireGroups
+
 ### 0.0.10 - 20220411
 
 Fix reference to authRoot.
