@@ -1,16 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * This is an HTTP server based on Express.
+ * This is the main executable of nginx auth_request server: naraad
  *
- * It handles requests from nginx auth_request directive to control access
- * to resources.
- *
- * It sets a cookie containing a JWT which confirms authentication and
- * authorization. It is this JWT which is validated in the verify request
- * from the auth_request directive.
- *
- * The JWT may be created to be compatible with CouchDB JWT authentication.
+ * This provides an interface between nginx and Azure AD OAuth 2.0 for
+ * authentication of users accessing nginx.
  */
 
 const getConfig = require('@ig3/config');
@@ -58,56 +52,65 @@ app.use(cookieParser());
 //* ***************************
 // Add route handlers
 
-// GET /verify handles the sub-request from nginx auth_request.
+// GET /verify handles the primary request from nginx auth_request.
 //
-// If the value of the authToken cookie is a JWT signed with a secret which
-// should be known only to this server, then the user is deemed to be
-// authenticated and authorized. This does not depend on the claims of the
-// JWT, beyond it still being valid / not expired.
+// If the user is authenticated, HTTP status 200 is returned. In this case,
+// nginx proceeds to server the requested content.
 //
-// If the JWT is verified successfully, HTTP status 200 is returned.
-// Otherwise status 401 is returned.
-//
-// The nginx configuration should redirect the 401 response to the
-// /authenticate path of this server, to initiate authentication of the user.
+// When a user is authenticated, a JWT is stored in cookie authToken. If
+// this token can be retrieved and is still valid, the user is
+// authenticated. Otherwise, the user is not authenticated.
 //
 app.get('/verify', (req, res) => {
+  console.log('GET /verify ');
   if (!req.cookies.authToken) {
     console.log('No valid authToken');
     return res.sendStatus(401);
   }
+  console.log('found an authToken cookie');
 
   let jwtSecret = config.jwtSecret;
   let jwtExpiry = config.jwtExpiry;
 
-  console.log('request header x-app: ' + req.headers['x-app']);
   if (
-    !config.applications ||
-    !config.applications[req.headers['x-app']]
+    req.cookies.auth &&
+    req.cookies.auth.application &&
+    config.applications[req.cookies.auth.application] &&
+    config.applications[req.cookies.auth.application].jwtSecret
   ) {
-    console.log('No application configured matching X-App header: ' + req.headers['x-app']);
-    console.log('config.applications is: ' + JSON.stringify(config.applications, null, 2));
-    return res.sendStatus(401);
+    jwtSecret = config.applications[req.cookies.auth.application].jwtSecret;
   }
-  const application = config.applications[req.headers['x-app']];
-  console.log('processing application: ' + JSON.stringify(application, null, 2));
-
-  // The application may overfide the default jwtSecret and/or jwtExpiry
   if (
-    application &&
-    config.applications &&
-    config.applications[application]
+    req.cookies.auth &&
+    req.cookies.auth.application &&
+    config.applications[req.cookies.auth.application] &&
+    config.applications[req.cookies.auth.application].jwtExpiry
   ) {
-    if (config.applications[application].jwtSecret) { jwtSecret = config.applications[application].jwtSecret; }
-
-    if (config.applications[application].jwtExpiry) { jwtExpiry = config.applications[application].jwtExpiry; }
+    jwtExpiry = config.applications[req.cookies.auth.application].jwtExpiry;
   }
 
-  // validate the token: it comes from an untrusted source but we can trust
-  // it if we verify it successfully, assuming jwtSecret is truly secret.
-  let payload;
+  console.log('jwtSecret: ', jwtSecret);
+
+  // validate the token: it comes from an untrusted source
   try {
-    payload = jwt.verify(req.cookies.authToken, jwtSecret);
+    const payload = jwt.verify(req.cookies.authToken, jwtSecret);
+    console.log('verified the authToken: ', payload);
+    // Generate a new token if the current one will expire soon
+    if (!payload.exp || (payload.exp - (Date.now() / 1000)) < 600) {
+      console.log('set authToken cookie');
+      try {
+        // jsonwebtoken won't sign if payload includes exp
+        // exp - expiry
+        // iat - issued at
+        delete payload.iat;
+        delete payload.exp;
+        const token = jwt.sign(payload, jwtSecret,
+          { expiresIn: jwtExpiry });
+        res.cookie('authToken', token, { httpOnly: true });
+      } catch (e) {
+        console.log('error generating new token: ', e);
+      }
+    }
   } catch (e) {
     if (config.debug) {
       console.log('error validating token: ', e);
@@ -116,38 +119,10 @@ app.get('/verify', (req, res) => {
     }
     return res.sendStatus(401);
   }
-  console.log('verified the authToken: ', payload);
-
-  // Generate a new token if the current one will expire soon
-  if (!payload.exp || (payload.exp - (Date.now() / 1000)) < 600) {
-    console.log('set authToken cookie');
-    try {
-      // jsonwebtoken won't sign if payload includes exp
-      // exp - expiry
-      // iat - issued at
-      delete payload.iat;
-      delete payload.exp;
-      const token = jwt.sign(payload, jwtSecret,
-        { expiresIn: jwtExpiry });
-      res.cookie('authToken', token, { httpOnly: true });
-    } catch (e) {
-      console.log('error generating new token: ', e);
-    }
-  }
 
   return res.sendStatus(200);
 });
 
-// GET /login returns a page which allows the user to choose an
-// authentication provider. The release code only supports provider type
-// o365, for authentication by Azure AD OAuth 2.0, but other providers may
-// be supported in development or future releases.
-//
-// Authentication failures may be directed here. If the request includes
-// query parameter 'flash' then the value of this will be presented to the
-// user. This may be used to inform the user of the reason for the
-// authentication failure.
-//
 app.get(
   '/login',
   (req, res) => {
@@ -158,8 +133,10 @@ app.get(
         !config.providers[req.query.provider]
       ) {
         return res.status(500)
-        .send('Unsupported provider: ' + req.query.provider);
+          .send('Unsupported provider: ' + req.query.provider);
       }
+
+      const provider = config.providers[req.query.provider];
 
       const authCookie = req.cookies.auth || {};
       authCookie.provider = req.query.provider;
@@ -180,22 +157,13 @@ app.get(
   }
 );
 
-// GET /authenticate initiates authentication.
+// If the user is not authenticated, /verify will return 401 and that will
+// be redirected to this path.
 //
-// The authentication provider should be specified in the 'provider'
-// attribute of the 'auth' cookie. If not, the user is redirected to
-// '/login/' to select a provider.
+// Set a cookie to record the path they were trying to get, as that will not
+// survive the redirects through the OAuth protocol.
 //
-// The URL to which the user will be redirected after successful
-// authentication may be specified in the 'originalURL' parameter of the
-// 'auth' cookie, or in header 'x-original-url'.
-//
-// This path is saved in the 'auth' cookie because otherwise it will not
-// survive the redirects through the authentication process.
-//
-// All being well, this redirects to that authentication provider specific
-// path '/authenticate/:provider'. The user may be redirected directly to
-// this path, avoiding this request entirely.
+// Redirect to the OAuth authentication URL.
 app.get(
   '/authenticate',
   (req, res) => {
@@ -234,9 +202,6 @@ app.get(
   }
 );
 
-// GET /authenticate/:provider initiates authentication via a particular
-// authentication provider. Only Azure AD OAuth 2.0 is supported but other
-// providers may be supported in furture releases.
 app.get(
   '/authenticate/:provider',
   (req, res, next) => {
@@ -246,7 +211,7 @@ app.get(
       !config.providers[req.params.provider]
     ) {
       return res.status(500)
-      .send('Unsupported provider: ' + req.params.provider);
+        .send('Unsupported provider: ' + req.params.provider);
     }
     const provider = config.providers[req.params.provider];
     const authCookie = req.cookies.auth || {};
@@ -272,7 +237,7 @@ app.get(
 
     if (!provider.type) {
       return res.status(500)
-      .send('Misconfigured provider: ' + req.params.provider);
+        .send('Misconfigured provider: ' + req.params.provider);
     }
 
     if (provider.type === 'o365') {
@@ -287,7 +252,7 @@ app.get(
       return res.redirect(uri);
     } else {
       return res.status(500)
-      .send('Unsupported provider type: ' + provider.type);
+        .send('Unsupported provider type: ' + provider.type);
     }
   }
 );
@@ -302,7 +267,7 @@ app.get(
 //
 // The tokens are obtained from a trusted source by an HTTPS request.
 //
-// TODO: validate the tokens
+// TODO: validate the tokens 
 app.get(
   '/callback/:provider',
   (req, res, next) => {
@@ -314,7 +279,7 @@ app.get(
       !config.providers[req.params.provider]
     ) {
       return res.status(500)
-      .send('Unsupported provider: ' + req.params.provider);
+        .send('Unsupported provider: ' + req.params.provider);
     }
     const provider = config.providers[req.params.provider];
 
@@ -327,17 +292,8 @@ app.get(
     const authRoot = req.headers['x-auth-root'];
     const callbackURL = authRoot + '/callback/' + req.params.provider;
 
-    console.log('request header x-app: ' + req.headers['x-app']);
-    if (
-      !config.applications ||
-      !config.applications[req.headers['x-app']]
-    ) {
-      console.log('No application configured matching X-App header: ' + req.headers['x-app']);
-      console.log('config.applications is: ' + JSON.stringify(config.applications, null, 2));
-      return res.sendStatus(401);
-    }
+    console.log('request for app: ' + req.headers['x-app']);
     const application = config.applications[req.headers['x-app']];
-    console.log('processing application: ' + JSON.stringify(application, null, 2));
 
     if (application) {
       console.log('application: ', application);
@@ -346,6 +302,7 @@ app.get(
     if (provider.type === 'o365') {
       let accessToken;
       let idToken;
+      let groups;
       getTokens(provider, req.query.code, callbackURL)
       .then(result => {
         accessToken = result.accessToken;
@@ -450,7 +407,7 @@ app.get(
             user.sub = accessClaims.upn;
             user.name = accessClaims.upn;
             // const roles = [ '_admin' ];
-            const roles = [];
+            const roles = [ ];
             console.log('map: ', application.groupMap);
             result.forEach(group => {
               console.log('group.displayName: ', group.displayName);
@@ -475,42 +432,38 @@ app.get(
                   mail: group.mail,
                   mailEnabled: group.mailEnabled,
                   securityEnabled: group.securityEnabled
-                };
+                }
               }
             });
             user.groups = groups;
           }
-          // If application.requireGroups is an array, user must be a
-          // member of at least one of the groups, not all of them.
           if (application.requireGroups) {
             console.log('require groups: ', application.requireGroups);
             let member = false;
             result.forEach(group => {
-              console.log('User is in AD group: ' + group.displayName);
+              console.log('Found AD group: ' + group.displayName);
               if (
-                (
-                  typeof application.requireGroups === 'string' &&
-                  group.displayName === application.requireGroup
-                ) || (
-                  typeof application.requireGroups === 'object' &&
-                  application.requireGroups.indexOf(group.displayName) !== -1
-                )
+                typeof application.requireGroups === 'string' &&
+                group.displayName === application.requireGroup
+                ||
+                typeof application.requireGroups === 'object' &&
+                application.requireGroups.indexOf(group.displayName) !== -1
               ) {
-                console.log('found required group: ' + group.displayName);
+                console.log('User is a member of required group: ', group.displayName);
                 member = true;
               }
             });
             if (!member) {
-              console.log('user is not a member of any required group');
+              console.log('User is not a member of any required group');
               const redirectURL = authRoot + '/login' +
                 '?flash=' + encodeURIComponent('Unauthorized');
-              res.redirect(redirectURL);
+              return res.redirect(redirectURL);
             }
           }
         }
         console.log('user: ', user);
         const token = jwt.sign(user, jwtSecret,
-          { expiresIn: jwtExpiry });
+          { expiresIn: config.jwtExpiry });
         console.log('token: ', token);
         console.log('token size: ', token.length);
         res.cookie('authToken', token, { httpOnly: httpOnly });
@@ -525,12 +478,12 @@ app.get(
       });
     } else {
       res.status(500)
-      .send('Unsupported provider type: ' + provider.type);
+        .send('Unsupported provider type: ' + provider.type);
     }
   }
 );
 
-function getGroups (provider, accessToken) {
+function getGroups(provider, accessToken) {
   return new Promise((resolve, reject) => {
     // Redeem the access code for access and id tokens.
     // The token endpoint will validate the access code for us.
@@ -540,11 +493,12 @@ function getGroups (provider, accessToken) {
       method: 'GET',
       path: '/v1.0/me/transitiveMemberOf',
       headers: {
-        Authorization: 'Bearer ' + accessToken
+        'Authorization': 'Bearer ' + accessToken
       }
     };
 
     const request = https.request(options, response => {
+
       let body = '';
 
       response.on('data', d => {
@@ -582,12 +536,12 @@ function getTokens (provider, accessCode, callbackURL) {
     // Redeem the access code for access and id tokens.
     // The token endpoint will validate the access code for us.
     const data = new URLSearchParams({
-      client_id: provider.oauth_client_id,
-      grant_type: 'authorization_code',
-      scope: provider.oauth_scope,
-      code: accessCode,
-      redirect_uri: callbackURL,
-      client_secret: provider.oauth_client_secret
+      'client_id': provider.oauth_client_id,
+      'grant_type': 'authorization_code',
+      'scope': provider.oauth_scope,
+      'code': accessCode,
+      'redirect_uri': callbackURL,
+      'client_secret': provider.oauth_client_secret
     }).toString();
 
     const options = {
@@ -602,6 +556,7 @@ function getTokens (provider, accessCode, callbackURL) {
     };
 
     const request = https.request(options, response => {
+
       let body = '';
 
       response.on('data', d => {
@@ -637,7 +592,7 @@ function getTokens (provider, accessCode, callbackURL) {
 // the response_type (e.g. "code id_token" or "id_token") then the default
 // response_mode doesn't work. When requesting a code, the default is
 // 'query' but when requesting an id_token it is fragment. The request to
-// the server doesn't include the fragment string.
+// the server doesn't include the fragment string. 
 //
 // See: https://stackoverflow.com/questions/2286402/url-fragment-and-302-redirects
 // "It's well known that the URL fragment (the part after the #) is not
@@ -675,14 +630,14 @@ app.post(
       !config.providers[req.params.provider]
     ) {
       return res.status(500)
-      .send('Unsupported provider: ' + req.params.provider);
+        .send('Unsupported provider: ' + req.params.provider);
     }
     const provider = config.providers[req.params.provider];
     const authCookie = req.cookies.auth || {};
 
     if (!provider.type) {
       return res.status(500)
-      .send('Misconfigured provider: ' + req.params.provider);
+        .send('Misconfigured provider: ' + req.params.provider);
     }
 
     if (provider.type === 'o365') {
@@ -709,11 +664,11 @@ app.post(
       //  Using the OAuth 2.0 flow, receiving the access code then redeeming
       //  that for id and access tokens from trusted source and trusting those
       //  (i.e. decode rather than verify, because from trusted source) requires
-      //  only 1 additional request, so it seems simpler.
+      //  only 1 additional request, so it seems simpler. 
       //
       //  If we were to verify the token either way, then this would be
       //  simpler.
-      //
+      // 
       const idToken = jwt.decode(req.body.id_token);
       console.log('idToken: ', JSON.stringify(idToken, null, 2));
 
@@ -737,10 +692,11 @@ app.post(
       res.redirect(redirectURL);
     } else {
       res.status(500)
-      .send('Unsupported provider type: ' + provider.type);
+        .send('Unsupported provider type: ' + provider.type);
     }
   }
 );
+
 
 // Anything else is an error. Log it and return a 404
 app.all('*', (req, res) => {
