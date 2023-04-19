@@ -430,7 +430,7 @@ app.get(
           displayName: accessClaims.name,
           email: idClaims.email,
           fullname: {
-            fmailyName: accessClaims.family_name,
+            familyName: accessClaims.family_name,
             givenName: accessClaims.given_name
           }
         };
@@ -721,7 +721,7 @@ app.post(
         displayName: idToken.name,
         email: idToken.email,
         name: {
-          fmailyName: idToken.family_name,
+          familyName: idToken.family_name,
           givenName: idToken.given_name
         }
       };
