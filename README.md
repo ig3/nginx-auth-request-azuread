@@ -487,3 +487,7 @@ Consolidate various changes that have been in test for several months.
 
 Add configuration to support multiple authentication providers, though
 Office 365 is still the only one for which there is implementation.
+
+### 1.0.4 - 20240717
+ * Replace tape with @ig3/test
+ * Update dependencies
