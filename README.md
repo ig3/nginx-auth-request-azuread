@@ -185,19 +185,19 @@ Example configuration:
   "debug": true,
   "server_port": 9000,
   "providers": {
-    "saasam_o365": {
+    "o365": {
       "name": "O365",
       "type": "o365",
-      "oauth_client_id": "6ab24693-6778-4cba-99f5-cb7fabd98659",
-      "oauth_client_secret": "ER57Q~.elWGTnljsCpyfXSK~RG-_ZAAAt3.dg",
+      "oauth_client_id": "6ab28693-6728-4cba-9bf5-cb7fabd98659",
+      "oauth_client_secret": "***top secret***",
       "oauth_scope": "User.Read openid",
-      "oauth_callback_url": "https://auth.entrain.nz/auth/office365/callback",
+      "oauth_callback_url": "https://example.com/auth/office365/callback",
       "oauth_server": "login.microsoftonline.com",
-      "oauth_authorization_url": "https://login.microsoftonline.com/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/authorize",
-      "oauth_authorization_path": "/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/authorize",
+      "oauth_authorization_url": "https://login.microsoftonline.com/da6bbd29-108b-43e2-9b37-06b2758737e9/oauth2/v2.0/authorize",
+      "oauth_authorization_path": "/da6bbd29-108b-43e2-9b37-06b2758737e9/oauth2/v2.0/authorize",
       "oauth_token_url": "https://login.microsoftonline.com/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/token",
-      "oauth_token_path": "/da6ffd29-108b-43e2-9b37-0692c58b32e9/oauth2/v2.0/token",
-      "oauth_tenant": "saasam.co"
+      "oauth_token_path": "/da6bbd29-108b-43e2-9b37-06b2758737e9/oauth2/v2.0/token",
+      "oauth_tenant": "example.com"
     }
   },
   "applications": {
@@ -453,30 +453,37 @@ request to the Graph API.
 
 ## Changes
 
-### 1.0.0 - 20220429
+### 0.0.5 - 20220331
 
-Enhance logging for application requireGroups
-
-### 0.0.10 - 20220411
-
-Fix reference to authRoot.
-
-### 0.0.9 - 20220411
-
-Stop using cookies for sensitive parameters.
-
-### 0.0.8 - 20220411
-
-Add app flag requireGroups
-
-### 0.0.7 - 20220408
-
-Add support for applications: couchdb
+Use URLSearchParams instead of querystring
 
 ### 0.0.6 - 20220331
 
 Update version of @ig3/config
 
-### 0.0.5 - 20220331
+### 0.0.7 - 20220408
 
-Use URLSearchParams instead of querystring
+Add support for applications: couchdb
+
+### 0.0.8 - 20220411
+
+Add app flag requireGroups
+
+### 0.0.9 - 20220411
+
+Stop using cookies for sensitive parameters.
+
+### 0.0.10 - 20220411
+
+Fix reference to authRoot.
+
+### 1.0.0 - 20220429
+
+Enhance logging for application requireGroups
+
+### 1.0.3 - 20230419
+
+Consolidate various changes that have been in test for several months.
+
+Add configuration to support multiple authentication providers, though
+Office 365 is still the only one for which there is implementation.
