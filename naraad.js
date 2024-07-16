@@ -97,10 +97,8 @@ app.get('/verify', (req, res) => {
     config.applications &&
     config.applications[application]
   ) {
-    if (config.applications[application].jwtSecret)
-      jwtSecret = config.applications[application].jwtSecret;
-    if (config.applications[application].jwtExpiry)
-      jwtExpiry = config.applications[application].jwtExpiry;
+    if (config.applications[application].jwtSecret) { jwtSecret = config.applications[application].jwtSecret; }
+    if (config.applications[application].jwtExpiry) { jwtExpiry = config.applications[application].jwtExpiry; }
   }
 
   console.log('jwtSecret: ', jwtSecret);
@@ -161,10 +159,10 @@ app.get(
         !config.providers[req.query.provider]
       ) {
         return res.status(500)
-          .send('Unsupported provider: ' + req.query.provider);
+        .send('Unsupported provider: ' + req.query.provider);
       }
 
-      const provider = config.providers[req.query.provider];
+      // const provider = config.providers[req.query.provider];
 
       const authCookie = req.cookies.auth || {};
       authCookie.provider = req.query.provider;
@@ -254,7 +252,7 @@ app.get(
       !config.providers[req.params.provider]
     ) {
       return res.status(500)
-        .send('Unsupported provider: ' + req.params.provider);
+      .send('Unsupported provider: ' + req.params.provider);
     }
     const provider = config.providers[req.params.provider];
     const authCookie = req.cookies.auth || {};
@@ -280,7 +278,7 @@ app.get(
 
     if (!provider.type) {
       return res.status(500)
-        .send('Misconfigured provider: ' + req.params.provider);
+      .send('Misconfigured provider: ' + req.params.provider);
     }
 
     if (provider.type === 'o365') {
@@ -295,7 +293,7 @@ app.get(
       return res.redirect(uri);
     } else {
       return res.status(500)
-        .send('Unsupported provider type: ' + provider.type);
+      .send('Unsupported provider type: ' + provider.type);
     }
   }
 );
@@ -310,7 +308,7 @@ app.get(
 //
 // The tokens are obtained from a trusted source by an HTTPS request.
 //
-// TODO: validate the tokens 
+// TODO: validate the tokens
 app.get(
   '/callback/:provider',
   (req, res, next) => {
@@ -322,7 +320,7 @@ app.get(
       !config.providers[req.params.provider]
     ) {
       return res.status(500)
-        .send('Unsupported provider: ' + req.params.provider);
+      .send('Unsupported provider: ' + req.params.provider);
     }
     const provider = config.providers[req.params.provider];
 
@@ -345,7 +343,6 @@ app.get(
     if (provider.type === 'o365') {
       let accessToken;
       let idToken;
-      let groups;
       getTokens(provider, req.query.code, callbackURL)
       .then(result => {
         accessToken = result.accessToken;
@@ -443,14 +440,14 @@ app.get(
         */
 
         let jwtSecret = config.jwtSecret;
-        let jwtExpiry = config.jwtExpiry;
+        // let jwtExpiry = config.jwtExpiry;
         let httpOnly = true;
         if (application) {
           if (application.couchdb) {
             user.sub = accessClaims.upn;
             user.name = accessClaims.upn;
             // const roles = [ '_admin' ];
-            const roles = [ ];
+            const roles = [];
             console.log('map: ', application.groupMap);
             result.forEach(group => {
               console.log('group.displayName: ', group.displayName);
@@ -460,7 +457,7 @@ app.get(
             });
             user['_couchdb.roles'] = roles;
             jwtSecret = application.jwtSecret;
-            jwtExpiry = application.jwtExpiry;
+            // jwtExpiry = application.jwtExpiry;
             httpOnly = false;
           }
           if (application.groupMap) {
@@ -475,7 +472,7 @@ app.get(
                   mail: group.mail,
                   mailEnabled: group.mailEnabled,
                   securityEnabled: group.securityEnabled
-                }
+                };
               }
             });
             user.groups = groups;
@@ -486,11 +483,13 @@ app.get(
             result.forEach(group => {
               console.log('Found AD group: ' + group.displayName);
               if (
-                typeof application.requireGroups === 'string' &&
-                group.displayName === application.requireGroup
-                ||
-                typeof application.requireGroups === 'object' &&
-                application.requireGroups.indexOf(group.displayName) !== -1
+                (
+                  typeof application.requireGroups === 'string' &&
+                  group.displayName === application.requireGroups
+                ) || (
+                  typeof application.requireGroups === 'object' &&
+                  application.requireGroups.indexOf(group.displayName) !== -1
+                )
               ) {
                 console.log('User is a member of required group: ', group.displayName);
                 member = true;
@@ -521,12 +520,12 @@ app.get(
       });
     } else {
       res.status(500)
-        .send('Unsupported provider type: ' + provider.type);
+      .send('Unsupported provider type: ' + provider.type);
     }
   }
 );
 
-function getGroups(provider, accessToken) {
+function getGroups (provider, accessToken) {
   return new Promise((resolve, reject) => {
     // Redeem the access code for access and id tokens.
     // The token endpoint will validate the access code for us.
@@ -536,12 +535,11 @@ function getGroups(provider, accessToken) {
       method: 'GET',
       path: '/v1.0/me/transitiveMemberOf',
       headers: {
-        'Authorization': 'Bearer ' + accessToken
+        Authorization: 'Bearer ' + accessToken
       }
     };
 
     const request = https.request(options, response => {
-
       let body = '';
 
       response.on('data', d => {
@@ -579,12 +577,12 @@ function getTokens (provider, accessCode, callbackURL) {
     // Redeem the access code for access and id tokens.
     // The token endpoint will validate the access code for us.
     const data = new URLSearchParams({
-      'client_id': provider.oauth_client_id,
-      'grant_type': 'authorization_code',
-      'scope': provider.oauth_scope,
-      'code': accessCode,
-      'redirect_uri': callbackURL,
-      'client_secret': provider.oauth_client_secret
+      client_id: provider.oauth_client_id,
+      grant_type: 'authorization_code',
+      scope: provider.oauth_scope,
+      code: accessCode,
+      redirect_uri: callbackURL,
+      client_secret: provider.oauth_client_secret
     }).toString();
 
     const options = {
@@ -599,7 +597,6 @@ function getTokens (provider, accessCode, callbackURL) {
     };
 
     const request = https.request(options, response => {
-
       let body = '';
 
       response.on('data', d => {
@@ -635,7 +632,7 @@ function getTokens (provider, accessCode, callbackURL) {
 // the response_type (e.g. "code id_token" or "id_token") then the default
 // response_mode doesn't work. When requesting a code, the default is
 // 'query' but when requesting an id_token it is fragment. The request to
-// the server doesn't include the fragment string. 
+// the server doesn't include the fragment string.
 //
 // See: https://stackoverflow.com/questions/2286402/url-fragment-and-302-redirects
 // "It's well known that the URL fragment (the part after the #) is not
@@ -673,14 +670,14 @@ app.post(
       !config.providers[req.params.provider]
     ) {
       return res.status(500)
-        .send('Unsupported provider: ' + req.params.provider);
+      .send('Unsupported provider: ' + req.params.provider);
     }
     const provider = config.providers[req.params.provider];
     const authCookie = req.cookies.auth || {};
 
     if (!provider.type) {
       return res.status(500)
-        .send('Misconfigured provider: ' + req.params.provider);
+      .send('Misconfigured provider: ' + req.params.provider);
     }
 
     if (provider.type === 'o365') {
@@ -707,11 +704,11 @@ app.post(
       //  Using the OAuth 2.0 flow, receiving the access code then redeeming
       //  that for id and access tokens from trusted source and trusting those
       //  (i.e. decode rather than verify, because from trusted source) requires
-      //  only 1 additional request, so it seems simpler. 
+      //  only 1 additional request, so it seems simpler.
       //
       //  If we were to verify the token either way, then this would be
       //  simpler.
-      // 
+      //
       const idToken = jwt.decode(req.body.id_token);
       console.log('idToken: ', JSON.stringify(idToken, null, 2));
 
@@ -735,11 +732,10 @@ app.post(
       res.redirect(redirectURL);
     } else {
       res.status(500)
-        .send('Unsupported provider type: ' + provider.type);
+      .send('Unsupported provider type: ' + provider.type);
     }
   }
 );
-
 
 // Anything else is an error. Log it and return a 404
 app.all('*', (req, res) => {
