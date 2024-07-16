@@ -8,8 +8,8 @@ const config = getConfig({
   defaults: {
     server_address: '0.0.0.0',
     server_port: 9090,
-    jwtExpiry: '1h'
-  }
+    jwtExpiry: '1h',
+  },
 });
 const app = require('../app')(config);
 const debug = require('debug')('api-tdd:server');
@@ -74,9 +74,11 @@ function onError (error) {
   case 'EACCES':
     console.error(bind + ' requires elevated privileges');
     process.exit(1);
+    break;
   case 'EADDRINUSE':
     console.error(bind + ' is already in use');
     process.exit(1);
+    break;
   default:
     throw error;
   }

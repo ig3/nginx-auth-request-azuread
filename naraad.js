@@ -30,8 +30,8 @@ const config = getConfig({
   defaults: {
     server_address: '0.0.0.0',
     server_port: 9090,
-    jwtExpiry: '1h'
-  }
+    jwtExpiry: '1h',
+  },
 });
 console.log('config: ', JSON.stringify(config, null, 2));
 
@@ -177,7 +177,7 @@ app.get(
     } else {
       res.render('login', {
         providers: config.providers,
-        flash: req.query.flash
+        flash: req.query.flash,
       });
     }
   }
@@ -428,8 +428,8 @@ app.get(
           email: idClaims.email,
           fullname: {
             familyName: accessClaims.family_name,
-            givenName: accessClaims.given_name
-          }
+            givenName: accessClaims.given_name,
+          },
         };
         /*
         const user = {
@@ -471,7 +471,7 @@ app.get(
                   id: group.id,
                   mail: group.mail,
                   mailEnabled: group.mailEnabled,
-                  securityEnabled: group.securityEnabled
+                  securityEnabled: group.securityEnabled,
                 };
               }
             });
@@ -535,8 +535,8 @@ function getGroups (provider, accessToken) {
       method: 'GET',
       path: '/v1.0/me/transitiveMemberOf',
       headers: {
-        Authorization: 'Bearer ' + accessToken
-      }
+        Authorization: 'Bearer ' + accessToken,
+      },
     };
 
     const request = https.request(options, response => {
@@ -582,7 +582,7 @@ function getTokens (provider, accessCode, callbackURL) {
       scope: provider.oauth_scope,
       code: accessCode,
       redirect_uri: callbackURL,
-      client_secret: provider.oauth_client_secret
+      client_secret: provider.oauth_client_secret,
     }).toString();
 
     const options = {
@@ -592,8 +592,8 @@ function getTokens (provider, accessCode, callbackURL) {
       path: provider.oauth_token_path,
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': data.length
-      }
+        'Content-Length': data.length,
+      },
     };
 
     const request = https.request(options, response => {
@@ -610,7 +610,7 @@ function getTokens (provider, accessCode, callbackURL) {
           // No need to validate the tokens: they come from a trusted source
           resolve({
             accessToken: data.access_token,
-            idToken: data.id_token
+            idToken: data.id_token,
           });
         } catch (e) {
           console.log('error getting access token: ', e);
@@ -719,8 +719,8 @@ app.post(
         email: idToken.email,
         name: {
           familyName: idToken.family_name,
-          givenName: idToken.given_name
-        }
+          givenName: idToken.given_name,
+        },
       };
       console.log('user: ', user);
       const token = jwt.sign({ user: user }, config.jwtSecret,

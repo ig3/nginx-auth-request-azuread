@@ -41,14 +41,14 @@ server.on('listening', () => {
 
 async function runTests (port) {
   const request = axios.create({
-    baseURL: 'http://localhost:' + port + '/'
+    baseURL: 'http://localhost:' + port + '/',
   });
 
   await t.test('verify returns 200 if valid authToken', (t) => {
     const token = jwt.sign({}, config.jwtSecret, { expiresIn: config.jwtExpiry });
     return request({
       url: '/verify',
-      headers: { Cookie: 'authToken=' + token }
+      headers: { Cookie: 'authToken=' + token },
     })
     .then(res => {
       t.equal(res.status, 200, 'Status is 200');
@@ -64,13 +64,13 @@ async function runTests (port) {
 
   await t.test('verify returns new JWT if existing JWT is near expiry', (t) => {
     const token = jwt.sign({
-      exp: Math.floor(Date.now() / 1000) + 60 * 9
+      exp: Math.floor(Date.now() / 1000) + 60 * 9,
     }, config.jwtSecret);
     return request({
       url: '/verify',
       headers: {
-        Cookie: 'authToken=' + token
-      }
+        Cookie: 'authToken=' + token,
+      },
     })
     .then(res => {
       t.equal(res.status, 200, 'Status is 200');
@@ -86,7 +86,7 @@ async function runTests (port) {
 
   await t.test('verify returns 401 if no JWT', (t) => {
     return request({
-      url: '/verify'
+      url: '/verify',
     })
     .then(res => {
       t.fail(res);
@@ -108,8 +108,8 @@ async function runTests (port) {
     return request({
       url: '/verify',
       headers: {
-        Cookie: 'authToken=asdf'
-      }
+        Cookie: 'authToken=asdf',
+      },
     })
     .then(res => {
       t.fail(res);
